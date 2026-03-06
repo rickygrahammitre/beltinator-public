@@ -1,0 +1,2351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SpaceSherpa Van Allen Beltinator — 3D Radiation Belt Explorer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ── VRButton inline (from Three.js examples) ──────────────────────
+// Provides the "Enter VR" button for WebXR sessions
+class VRButton {
+  static createButton(renderer) {
+    const button = document.createElement('button');
+    function showEnterVR() {
+      let currentSession = null;
+      async function onSessionStarted(session) {
+        session.addEventListener('end', onSessionEnded);
+        await renderer.xr.setSession(session);
+        button.textContent = 'EXIT VR';
+        currentSession = session;
+      }
+      function onSessionEnded() {
+        currentSession.removeEventListener('end', onSessionEnded);
+        button.textContent = 'ENTER VR';
+        currentSession = null;
+      }
+      button.style.display = '';
+      button.style.cursor = 'pointer';
+      button.style.width = '180px';
+      button.textContent = 'ENTER VR';
+      button.onclick = function() {
+        if (currentSession === null) {
+          const sessionInit = { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'] };
+          navigator.xr.requestSession('immersive-vr', sessionInit).then(onSessionStarted);
+        } else {
+          currentSession.end();
+        }
+      };
+    }
+    function showWebXRNotFound() {
+      button.textContent = 'VR NOT SUPPORTED';
+      button.style.display = '';
+      button.style.width = '220px';
+      button.onclick = null;
+      button.style.cursor = 'default';
+      button.style.opacity = '0.5';
+    }
+    Object.assign(button.style, {
+      position: 'absolute', top: '12px', left: '50%', transform: 'translateX(-50%)',
+      padding: '14px 32px',
+      border: '2px solid #22d3ee', borderRadius: '10px',
+      background: 'rgba(6,8,15,0.95)', color: '#22d3ee',
+      font: '700 15px "JetBrains Mono", monospace', textAlign: 'center',
+      zIndex: '9999', transition: 'all 0.3s',
+      boxShadow: '0 0 20px rgba(34,211,238,0.3)',
+      letterSpacing: '2px',
+    });
+    button.onmouseenter = () => { button.style.background = 'rgba(34,211,238,0.15)'; };
+    button.onmouseleave = () => { button.style.background = 'rgba(6,8,15,0.9)'; };
+    if ('xr' in navigator) {
+      navigator.xr.isSessionSupported('immersive-vr').then(supported => {
+        supported ? showEnterVR() : showWebXRNotFound();
+      }).catch(showWebXRNotFound);
+    } else {
+      showWebXRNotFound();
+    }
+    return button;
+  }
+}
+</script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Space+Grotesk:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-primary: #06080f;
+    --bg-panel: rgba(10, 14, 26, 0.94);
+    --bg-card: rgba(16, 22, 40, 0.88);
+    --accent-blue: #3b82f6;
+    --accent-cyan: #22d3ee;
+    --accent-amber: #f59e0b;
+    --accent-orange: #f97316;
+    --accent-red: #ef4444;
+    --accent-green: #10b981;
+    --accent-purple: #a855f7;
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --text-dim: #475569;
+    --border: rgba(59, 130, 246, 0.12);
+    --border-active: rgba(34, 211, 238, 0.35);
+    --glow-blue: 0 0 20px rgba(59, 130, 246, 0.25);
+    --glow-cyan: 0 0 15px rgba(34, 211, 238, 0.2);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Outfit', sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  #canvas-container {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 0;
+    cursor: grab;
+  }
+  #canvas-container.grabbing { cursor: grabbing; }
+
+  canvas { display: block; }
+
+  /* ====== TOP BAR ====== */
+  .top-bar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 56px;
+    background: linear-gradient(180deg, rgba(10, 14, 26, 0.97) 0%, rgba(10, 14, 26, 0.92) 100%);
+    backdrop-filter: blur(24px);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    z-index: 100;
+    gap: 12px;
+  }
+
+  .top-bar .logo {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .top-bar .logo img {
+    height: 38px;
+    width: auto;
+    border-radius: 6px;
+    object-fit: contain;
+  }
+
+  .top-bar .divider {
+    width: 1px;
+    height: 24px;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+
+  .top-bar .title-block {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .top-bar .title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: 0.3px;
+  }
+
+  .top-bar .subtitle {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+
+  .top-bar .status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent-green);
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* ====== LEFT CONTROL PANEL ====== */
+  .control-panel {
+    position: fixed;
+    left: 10px;
+    top: 66px;
+    bottom: 10px;
+    width: 310px;
+    background: var(--bg-panel);
+    backdrop-filter: blur(24px);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    z-index: 50;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(71,85,105,0.4) transparent;
+  }
+
+  .control-panel::-webkit-scrollbar { width: 3px; }
+  .control-panel::-webkit-scrollbar-track { background: transparent; }
+  .control-panel::-webkit-scrollbar-thumb { background: rgba(71,85,105,0.4); border-radius: 2px; }
+
+  .panel-section {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .panel-section:last-child { border-bottom: none; }
+
+  .section-header {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--accent-cyan);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .section-header::before {
+    content: '';
+    width: 3px;
+    height: 10px;
+    background: var(--accent-cyan);
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  /* ====== SLIDER CONTROLS ====== */
+  .slider-group { margin-bottom: 12px; }
+
+  .slider-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 5px;
+  }
+
+  .slider-label .name {
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    font-weight: 400;
+  }
+
+  .slider-label .value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--accent-amber);
+    font-weight: 500;
+    min-width: 60px;
+    text-align: right;
+  }
+
+  .slider-label .value.driven {
+    color: var(--accent-cyan);
+    animation: valuePulse 2s infinite;
+  }
+
+  @keyframes valuePulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  input[type="range"] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 3px;
+    background: rgba(59, 130, 246, 0.12);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  input[type="range"]:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: var(--accent-cyan);
+    box-shadow: 0 0 8px rgba(34, 211, 238, 0.45);
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+
+  input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.25);
+    box-shadow: 0 0 14px rgba(34, 211, 238, 0.7);
+  }
+
+  input[type="range"]::-moz-range-thumb {
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: var(--accent-cyan);
+    box-shadow: 0 0 8px rgba(34, 211, 238, 0.45);
+    cursor: pointer;
+    border: none;
+  }
+
+  /* ====== BUTTONS ====== */
+  .btn-group {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.3px;
+  }
+
+  .btn:hover {
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+    box-shadow: var(--glow-cyan);
+  }
+
+  .btn.active {
+    background: rgba(34, 211, 238, 0.1);
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+  }
+
+  /* ====== RIGHT INFO PANEL ====== */
+  .info-panel {
+    position: fixed;
+    right: 10px;
+    top: 66px;
+    width: 350px;
+    max-height: calc(100vh - 76px);
+    overflow-y: auto;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(71,85,105,0.4) transparent;
+  }
+
+  .info-panel::-webkit-scrollbar { width: 3px; }
+  .info-panel::-webkit-scrollbar-track { background: transparent; }
+  .info-panel::-webkit-scrollbar-thumb { background: rgba(71,85,105,0.4); border-radius: 2px; }
+
+  .info-card {
+    background: var(--bg-panel);
+    backdrop-filter: blur(24px);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    transition: border-color 0.3s;
+  }
+
+  .info-card:hover {
+    border-color: rgba(59, 130, 246, 0.25);
+  }
+
+  .info-card h3 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--accent-cyan);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .info-card h3::before {
+    content: '';
+    width: 3px;
+    height: 10px;
+    background: var(--accent-cyan);
+    border-radius: 2px;
+  }
+
+  .equation-display {
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(59, 130, 246, 0.08);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin: 8px 0;
+    overflow-x: auto;
+  }
+
+  .equation-display .eq-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8.5px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .equation-display .eq-content {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--accent-amber);
+    line-height: 1.9;
+    white-space: nowrap;
+  }
+
+  .metric-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(59, 130, 246, 0.06);
+  }
+
+  .metric-row:last-child { border-bottom: none; }
+
+  .metric-row .label {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .metric-row .val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  .metric-row .val.warn { color: var(--accent-amber); }
+  .metric-row .val.danger { color: var(--accent-red); }
+  .metric-row .val.safe { color: var(--accent-green); }
+
+  .description-text {
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+  }
+
+  /* ====== SATELLITE LEGEND ====== */
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: 10.5px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: color 0.2s;
+  }
+  .legend-item:hover { color: var(--accent-cyan); }
+
+  .legend-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ====== BOTTOM BAR ====== */
+  .bottom-bar {
+    position: fixed;
+    bottom: 10px;
+    left: 332px;
+    right: 372px;
+    height: 40px;
+    background: var(--bg-panel);
+    backdrop-filter: blur(24px);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    z-index: 50;
+    gap: 14px;
+  }
+
+  .bottom-bar .metric {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .bottom-bar .metric .lbl {
+    font-size: 9px;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.5px;
+  }
+
+  .bottom-bar .metric .val {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--accent-cyan);
+    font-weight: 500;
+  }
+
+  .bottom-bar .sep {
+    width: 1px;
+    height: 18px;
+    background: var(--border);
+  }
+
+  /* ====== TABS ====== */
+  .tab-row {
+    display: flex;
+    gap: 3px;
+    margin-bottom: 8px;
+  }
+
+  .tab {
+    padding: 4px 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8.5px;
+    letter-spacing: 0.3px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .tab:hover { color: var(--text-secondary); border-color: rgba(59, 130, 246, 0.2); }
+  .tab.active {
+    background: rgba(34, 211, 238, 0.08);
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+  }
+
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* ====== TOGGLE ====== */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 0;
+  }
+
+  .toggle-row label {
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+
+  .toggle {
+    position: relative;
+    width: 34px;
+    height: 18px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(59, 130, 246, 0.12);
+    border-radius: 9px;
+    outline: none;
+    cursor: pointer;
+    transition: 0.25s;
+    flex-shrink: 0;
+  }
+
+  .toggle:checked { background: var(--accent-cyan); }
+
+  .toggle::before {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    background: white;
+    border-radius: 50%;
+    transition: 0.25s;
+  }
+
+  .toggle:checked::before { left: 18px; }
+
+  /* ====== COLOR BAR ====== */
+  .color-bar {
+    width: 100%;
+    height: 10px;
+    border-radius: 5px;
+    background: linear-gradient(to right, #1a237e, #1565c0, #43a047, #fdd835, #ff6f00, #d50000);
+    margin: 6px 0 3px;
+  }
+
+  .color-bar-labels {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8.5px;
+    color: var(--text-dim);
+  }
+
+  /* ====== STORM INDICATOR ====== */
+  .storm-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    margin-top: 8px;
+    transition: all 0.3s;
+  }
+
+  .storm-indicator.quiet { background: rgba(16, 185, 129, 0.1); color: var(--accent-green); border: 1px solid rgba(16, 185, 129, 0.2); }
+  .storm-indicator.moderate { background: rgba(245, 158, 11, 0.1); color: var(--accent-amber); border: 1px solid rgba(245, 158, 11, 0.2); }
+  .storm-indicator.intense { background: rgba(239, 68, 68, 0.1); color: var(--accent-red); border: 1px solid rgba(239, 68, 68, 0.2); }
+
+  .storm-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+  }
+
+  .storm-indicator.quiet .storm-dot { background: var(--accent-green); box-shadow: 0 0 6px rgba(16,185,129,0.5); }
+  .storm-indicator.moderate .storm-dot { background: var(--accent-amber); box-shadow: 0 0 6px rgba(245,158,11,0.5); }
+  .storm-indicator.intense .storm-dot { background: var(--accent-red); box-shadow: 0 0 6px rgba(239,68,68,0.5); animation: pulse 1s infinite; }
+
+  /* ====== SATELLITE TOOLTIP ====== */
+  #sat-tooltip {
+    position: fixed;
+    z-index: 200;
+    background: var(--bg-panel);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--border-active);
+    border-radius: 10px;
+    padding: 12px 16px;
+    pointer-events: none;
+    display: none;
+    min-width: 200px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5), var(--glow-cyan);
+  }
+  #sat-tooltip.visible { display: block; pointer-events: auto; }
+  #sat-tooltip .sat-name {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  #sat-tooltip .sat-detail {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+  }
+
+  /* ====== BACK BUTTON (from satellite zoom) ====== */
+  #zoom-back-btn {
+    position: fixed;
+    top: 66px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 150;
+    background: var(--bg-panel);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--accent-cyan);
+    border-radius: 8px;
+    padding: 8px 20px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--accent-cyan);
+    cursor: pointer;
+    display: none;
+    gap: 6px;
+    align-items: center;
+    box-shadow: var(--glow-cyan);
+    transition: all 0.2s;
+  }
+  #zoom-back-btn:hover { background: rgba(34, 211, 238, 0.12); }
+  #zoom-back-btn.visible { display: flex; }
+
+  /* ====== KP TIMELINE BAR ====== */
+  .kp-timeline {
+    display: flex;
+    gap: 2px;
+    margin-top: 6px;
+    height: 20px;
+    align-items: flex-end;
+  }
+  .kp-bar {
+    flex: 1;
+    border-radius: 2px 2px 0 0;
+    transition: height 0.3s, background 0.3s;
+    min-height: 2px;
+    position: relative;
+  }
+  .kp-bar.current {
+    outline: 1px solid var(--accent-cyan);
+    outline-offset: 1px;
+  }
+  .kp-timeline-labels {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 7.5px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+
+  /* ====== ANIMATIONS ====== */
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .control-panel, .info-panel, .bottom-bar {
+    animation: fadeSlideIn 0.5s ease-out;
+  }
+
+  .info-card {
+    animation: fadeSlideIn 0.5s ease-out backwards;
+  }
+  .info-card:nth-child(1) { animation-delay: 0.05s; }
+  .info-card:nth-child(2) { animation-delay: 0.1s; }
+  .info-card:nth-child(3) { animation-delay: 0.15s; }
+  .info-card:nth-child(4) { animation-delay: 0.2s; }
+  .info-card:nth-child(5) { animation-delay: 0.25s; }
+
+  @media (max-width: 1200px) {
+    .info-panel { display: none; }
+    .bottom-bar { right: 20px; }
+  }
+  @media (max-width: 800px) {
+    .control-panel { width: 260px; }
+    .bottom-bar { left: 280px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Top Bar -->
+<div class="top-bar">
+  <span class="logo">
+    <img src="data:image/webp;base64,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" alt="SpaceSherpa">
+    <img src="data:image/webp;base64,UklGRi4HAABXRUJQVlA4ICIHAABwHgCdASpQAEgAPok0lEelIqIhMzmdmKARCUAZCnl39WRHWrnw2bCYjvZXszyHOifMv6t/quGX4M5P/8B5zMBdcf9X/1PhL6i96JxIvjvsAfnP9ZfYb/5/1u9NH057BP8v/sH/J9cr2I+j4s9/VsyHw9ArW//mwtSdFuG21+UibnLo+r37Rnr61AVwjyBgwff6+qN4sG2cuffsbDQrrwHtjn99k1aItwWj78brW6/+LXg1AlS2IgVNYKGAloxYrJqqiWg7TK025TUvLIzbw+9N1ObnsHSst6z3LanXx+tv8GDSw5QoudDfcaFBBgns5xwfNoAXhhjFGSCEoQAA/v71xBI8G5xzO+LS9k0LI58U0mx4/oqTdivQeHj/5kCotV6QH4OikSUkv989cyr9kNHdoPjIsID9vE60wJZj0VDwRbwOqwYpt4GCJyfi4zcmcqa7tUmuw2ujLQtxvPJX44pv0u+4FMb0xzijUUK9Vgsch8Eu2cst6bcikOZwYpdLApmQvwLyRcl0fInQAz/85JqGosUc539n8e16rkge7Z3Isee3np6zTw/3yatrmhtH/LSHB9NazflXiywyJpsjsm/PGg3HCo39VD7n4YdpRCfK/KU8BsNnPJyfPGClCbh358ssV22vKDoJnTHu3YsMl+Bouz4Cmclu8gk9y9eONpybIdEv4xufWhXNfN1iPyVsceMhUYoZh5wS/tzcOV1yUtUWJasqGPd7MScQRcGSWuKH4snxoP5B5D6a6y5Qd+rOMpi2qWFXPvN2nff+LRal/ocbjmrJ8866r0Fkn5PAXYgf1hldIaqvqhB/w4ZZeX6ShhCjYoIPYDPivMWrT+PdhkuoVME/LUy7nPF6Cr4fRHp5ycBP7UKQcfoq6xfMF9n5CXfgQe96XcwKRLkDfPI/PbZwrKFRQldsgo6veL8/e0+3r4KKvdInEnkreM3VYj9cnzXeFv7VfLQf84hazJoVIesmnnYtqJ7V8ZuAhZIjfsk7NApDBaCy/xGjH+FlifkQqS/HEsdba36+bxl9Zr2fzO6qBdf0lrh4dn1/9yG0GQkQueZqGPdBquPShMp4qXJUisrXN0Rean5bjYSds/Clg1+e9M2zvqE/PnG4bD2N6rb2gsEAMpIV183W5OPVZYB23YPUSF0Uh+nMP6swiuFAc5uuFVDwJzpb3/OKNioydIrGvstsGxX5sxdLZmNHT/YRf2TzteY37Fu1Q0g1pJFK1+wk2PyEFndFIEK7mAmcBi4jxfuWGSppnFeUslee7F//feLSP0CtNkF+tAdCFK6xucmqajFncXSwl1cpMSEnS0GjPgzY0zGy9pHDus+Ql0OJLcearl3Ni3lq7kcDya2RubFMGrWpcExH2LjPJhCaSjnvhoZjcv44NSxi23i2w69qcUkb0sS1Giuhgf0GnjbfYjRPCU1jQtGFjrZO9HcUKnRk7+yW2WZ5khvToyvxwpI4zumXrUYvM0OWyu4avwk77nvkr5vi7/zJOz353B737Fs6mQWjSux/DuoFUdDwLNnsTBZL2wX9b2qZgYFHOU81piEaVzyf66IfJOp+AYFU2K+aqLn6pyKjnuj+CQHdx0n6XOyFDbikINpSO+cggAtzk403n0cGN8sXcPWwGKDNZ97xR6Z2W03m2K9EmL+a7WI4j7YLrHLtAPFNi6U3iJw/jG/1/vyS8O8DHTVT2QrNe7L+b6vQJOfrB9817+mJEBCUZQhrDM6DmJ7NZf6Gs3Vhw1fRwEomRQcr89HP83A1wXIqbWf9jmuyPFv/CiDu7wuFITb2qc0/vZh2Xb06x8VnpL/xB0Xjb7/li+t2mGiaBb2Cn3greM42Al2oAEcfr4OD+rm0tioF4+Hl18ecAe+csmtlS/61//CRsxiLeq77o39jnMyEP/BN/v+DgAJYJgR4v30wIkiFAQxrp+PgBJaTK1Iwpnfw9FUxMnxymJ5M1MPouNw6+HGeKtyKK87oarsk43k4rVzXYiimKvJEisY/JmI63Se+j7zTn8Ob1chXZNCCVtANfsUj8Tv9ri9aRRHx/fxMKYyDjGyj6VP5hfZgVVxYfTXjdAYNoW/GDvsIc5qSFHutJ/A/OAcF+6mSQHZek7fjUTq+f0QK0JpXt9NR2f348JWkeKjuHN28pHb//KTOugrAZu/Ae8VXgPd4Pjjmvv+SvFd30euOxa44riqgbt21Cm2v8HwTCbyrvCHWpxq4LdWs1Ph4a0/5xHlqQs353bSp7osyLqjenfd9sCaHORBFBhE8oZgW9LQ//J8OGfxljvcuQfsOWyvi+Xu/CJ3/wZ0Yf67e/TLYg+2LAVd1P/wHMOIfoPSb9RAiuUF/Dia40Vz9fOsg9QjpldnphXmnUBFGCYxw637foWkxsfWcmpcHK/Qr1WXgbCPY8cd7QTArl7CJ/g17oAesHwjpt3GdJIAAAA==" alt="Beltinator">
+  </span>
+  <div class="divider"></div>
+  <div class="title-block">
+    <span class="title">Van Allen Beltinator</span>
+    <span class="subtitle">3D Fokker-Planck Radiation Belt Explorer</span>
+  </div>
+  <a href="https://beltinator-3324eb.pages.mitre.org/" style="margin-left:auto;display:flex;align-items:center;gap:6px;padding:5px 12px;border:1px solid var(--border);border-radius:6px;background:rgba(34,211,238,0.06);color:var(--accent-cyan);font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:1px;text-decoration:none;transition:all 0.2s;" onmouseenter="this.style.background='rgba(34,211,238,0.15)'" onmouseleave="this.style.background='rgba(34,211,238,0.06)'" title="Back to Interactive Storyboard">&#9664; Storyboard</a>
+  <div class="status">
+    <div class="status-dot"></div>
+    <span id="fps-counter">Rendering</span>
+    <span style="margin-left:8px; color:var(--accent-amber);" id="sim-time-display">T+0.0h</span>
+  </div>
+</div>
+
+<!-- 3D Canvas -->
+<div id="canvas-container"></div>
+
+<!-- Satellite Tooltip -->
+<div id="sat-tooltip">
+  <div class="sat-name" id="sat-tooltip-name"></div>
+  <div class="sat-detail" id="sat-tooltip-detail"></div>
+</div>
+
+<!-- Zoom Back Button -->
+<button id="zoom-back-btn" onclick="zoomBackToOverview()">◀ Back to Overview</button>
+
+<!-- Left Control Panel -->
+<div class="control-panel">
+
+  <div class="panel-section">
+    <div class="section-header">Physics Parameters</div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">L* (Drift Shell)</span>
+        <span class="value" id="lstar-val">4.5</span>
+      </div>
+      <input type="range" id="lstar" min="1" max="8" step="0.1" value="4.5">
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">Energy (MeV)</span>
+        <span class="value" id="energy-val">1.0</span>
+      </div>
+      <input type="range" id="energy" min="0.1" max="10" step="0.1" value="1.0">
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">Equatorial Pitch Angle α₀ (°)</span>
+        <span class="value" id="alpha-val">45</span>
+      </div>
+      <input type="range" id="alpha" min="1" max="89" step="1" value="45">
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">D<sub>L*L*</sub> (Radial Diffusion)</span>
+        <span class="value driven" id="dll-val">1.0e-6 ⟲</span>
+      </div>
+      <input type="range" id="dll" min="-9" max="-3" step="0.1" value="-6" disabled title="Driven by Kp(t)">
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">D<sub>pp</sub> (Momentum Diffusion)</span>
+        <span class="value" id="dpp-val">1.0e-7</span>
+      </div>
+      <input type="range" id="dpp" min="-10" max="-4" step="0.1" value="-7">
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">D<sub>α₀α₀</sub> (Pitch-Angle Diffusion)</span>
+        <span class="value" id="daa-val">1.0e-5</span>
+      </div>
+      <input type="range" id="daa" min="-8" max="-2" step="0.1" value="-5">
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">D<sub>α₀p</sub> (Mixed Diffusion)</span>
+        <span class="value" id="dap-val">0 (off)</span>
+      </div>
+      <input type="range" id="dap" min="-10" max="-4" step="0.1" value="-10" disabled>
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">Loss Timescale τ (days)</span>
+        <span class="value" id="tau-val">10.0</span>
+      </div>
+      <input type="range" id="tau" min="0.1" max="30" step="0.1" value="10">
+    </div>
+  </div>
+
+  <div class="panel-section">
+    <div class="section-header">Geomagnetic Conditions</div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">Kp Baseline</span>
+        <span class="value" id="kp-val">3</span>
+      </div>
+      <input type="range" id="kp" min="0" max="9" step="1" value="3">
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">Dst Index (nT)</span>
+        <span class="value" id="dst-val">-30</span>
+      </div>
+      <input type="range" id="dst" min="-300" max="50" step="5" value="-30">
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">Solar Wind V<sub>sw</sub> (km/s)</span>
+        <span class="value" id="vsw-val">400</span>
+      </div>
+      <input type="range" id="vsw" min="200" max="900" step="10" value="400">
+    </div>
+
+    <div class="storm-indicator quiet" id="storm-indicator">
+      <div class="storm-dot"></div>
+      <span id="storm-label">Quiet Conditions</span>
+    </div>
+
+    <!-- Kp 3-hour timeline -->
+    <div style="margin-top:10px;">
+      <div class="section-header" style="font-size:8px; margin-bottom:4px;">Kp(t) — 3-Hour Cadence Profile</div>
+      <div class="kp-timeline" id="kp-timeline"></div>
+      <div class="kp-timeline-labels">
+        <span>0h</span><span>12h</span><span>24h</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-section">
+    <div class="section-header">Visualization</div>
+
+    <div class="toggle-row">
+      <label for="show-belts">Radiation Belts</label>
+      <input type="checkbox" class="toggle" id="show-belts" checked>
+    </div>
+    <div class="toggle-row">
+      <label for="show-orbits">Satellite Orbits</label>
+      <input type="checkbox" class="toggle" id="show-orbits" checked>
+    </div>
+    <div class="toggle-row">
+      <label for="show-field">Magnetic Field Lines</label>
+      <input type="checkbox" class="toggle" id="show-field" checked>
+    </div>
+    <div class="toggle-row">
+      <label for="show-particles">Particle Trajectories</label>
+      <input type="checkbox" class="toggle" id="show-particles" checked>
+    </div>
+    <div class="toggle-row">
+      <label for="show-loss-cone">Loss Cone</label>
+      <input type="checkbox" class="toggle" id="show-loss-cone">
+    </div>
+    <div class="toggle-row">
+      <label for="mixed-terms">Include Mixed Terms (Eq.3)</label>
+      <input type="checkbox" class="toggle" id="mixed-terms">
+    </div>
+    <div class="toggle-row">
+      <label for="sim-running">Run Kp(t) Simulation</label>
+      <input type="checkbox" class="toggle" id="sim-running" checked>
+    </div>
+
+    <div style="margin-top: 10px;">
+      <div class="slider-group">
+        <div class="slider-label">
+          <span class="name">Sim Speed (×)</span>
+          <span class="value" id="sim-speed-val">60</span>
+        </div>
+        <input type="range" id="sim-speed" min="1" max="360" step="1" value="60">
+      </div>
+    </div>
+
+    <div style="margin-top: 6px;">
+      <div class="section-header" style="font-size:8px; margin-bottom:6px;">Flux Intensity (cm⁻²s⁻¹sr⁻¹MeV⁻¹)</div>
+      <div class="color-bar"></div>
+      <div class="color-bar-labels">
+        <span>10²</span><span>10⁴</span><span>10⁶</span><span>10⁸</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-section">
+    <div class="section-header">Presets</div>
+    <div class="btn-group">
+      <button class="btn active" onclick="applyPreset('quiet', this)">Quiet Time</button>
+      <button class="btn" onclick="applyPreset('moderate', this)">Moderate Storm</button>
+      <button class="btn" onclick="applyPreset('intense', this)">Intense Storm</button>
+      <button class="btn" onclick="applyPreset('recovery', this)">Recovery Phase</button>
+    </div>
+  </div>
+
+  <div class="panel-section">
+    <div class="section-header">Satellites (Click in 3D to zoom)</div>
+    <div class="legend-item" onclick="focusSatByName('RBSP')"><div class="legend-dot" style="background:#ef4444;"></div>Van Allen Probes (RBSP A/B)</div>
+    <div class="legend-item" onclick="focusSatByName('THEMIS-A')"><div class="legend-dot" style="background:#3b82f6;"></div>THEMIS A / D / E</div>
+    <div class="legend-item" onclick="focusSatByName('GOES')"><div class="legend-dot" style="background:#10b981;"></div>GOES (GEO)</div>
+    <div class="legend-item" onclick="focusSatByName('LEO')"><div class="legend-dot" style="background:#f59e0b;"></div>LEO Satellites</div>
+    <div class="legend-item" onclick="focusSatByName('Lomonosov')"><div class="legend-dot" style="background:#a855f7;"></div>Lomonosov</div>
+  </div>
+
+  <div class="panel-section">
+    <div class="section-header">Output / Streaming</div>
+    <div class="btn-group" style="flex-direction:column;gap:6px;">
+      <button class="btn" onclick="openStreamWindow()" title="Open canvas stream for OBS / NDI / Spout capture">&#128225; Stream Output</button>
+      <button class="btn" id="igloo-toggle-btn" onclick="toggleIglooMode()" title="Toggle IGLOO 6-face cubemap mode (also: press I)">&#9645; IGLOO Cubemap</button>
+      <button class="btn" id="equirect-stream-btn" onclick="openEquirectStream()" title="Stream equirectangular 360 output for IGLOO Core Engine NDI input">&#9678; Equirect Stream (IGLOO)</button>
+    </div>
+    <div style="margin-top:8px;font-size:9px;color:var(--text-dim);line-height:1.5;">
+      Stream Output opens a clean popup.<br>
+      Capture in <strong style="color:var(--accent-cyan);">OBS</strong> &rarr; output via
+      <strong style="color:var(--accent-cyan);">NDI</strong> (OBS-NDI plugin) or
+      <strong style="color:var(--accent-cyan);">Spout</strong> (obs-spout2 plugin).
+    </div>
+  </div>
+
+</div>
+
+<!-- Right Info Panel -->
+<div class="info-panel">
+
+  <div class="info-card">
+    <h3>Computed Values</h3>
+    <div class="metric-row">
+      <span class="label">T(α₀) Bounce Factor</span>
+      <span class="val" id="bounce-val">1.0802</span>
+    </div>
+    <div class="metric-row">
+      <span class="label">Phase Space Density f</span>
+      <span class="val" id="psd-val">2.34e-10</span>
+    </div>
+    <div class="metric-row">
+      <span class="label">Differential Flux j</span>
+      <span class="val" id="flux-val">4.56e+04</span>
+    </div>
+    <div class="metric-row">
+      <span class="label">D<sub>L*L*</sub> (Kp-driven)</span>
+      <span class="val" id="dll-live" style="color:var(--accent-cyan);">1.0e-6</span>
+    </div>
+    <div class="metric-row">
+      <span class="label">Kp(t) Current</span>
+      <span class="val" id="kp-current-val">3.0</span>
+    </div>
+    <div class="metric-row">
+      <span class="label">Magnetopause L<sub>mp</sub></span>
+      <span class="val" id="lmp-val">10.2 R<sub>E</sub></span>
+    </div>
+    <div class="metric-row">
+      <span class="label">Last Closed Drift Shell</span>
+      <span class="val" id="lcds-val">7.8 R<sub>E</sub></span>
+    </div>
+    <div class="metric-row">
+      <span class="label">Bounce Loss Cone α<sub>BLC</sub></span>
+      <span class="val" id="blc-val">3.2°</span>
+    </div>
+    <div class="metric-row">
+      <span class="label">Drift Loss Cone α<sub>DLC</sub></span>
+      <span class="val" id="dlc-val">5.1°</span>
+    </div>
+    <div class="metric-row">
+      <span class="label">Particle Status</span>
+      <span class="val safe" id="trap-status">Trapped</span>
+    </div>
+  </div>
+
+  <div class="info-card">
+    <h3>Governing Equations</h3>
+    <div class="tab-row">
+      <button class="tab active" onclick="showTab('eq1',this)">Eq.1</button>
+      <button class="tab" onclick="showTab('eq2',this)">Eq.2</button>
+      <button class="tab" onclick="showTab('eq3',this)">Eq.3</button>
+      <button class="tab" onclick="showTab('eq4',this)">T(α₀)</button>
+      <button class="tab" onclick="showTab('eq5',this)">D<sub>LL</sub>(Kp)</button>
+    </div>
+
+    <div id="eq1" class="tab-content active">
+      <div class="equation-display">
+        <div class="eq-label">Eq.1 — Generalized Diffusion Equation</div>
+        <div class="eq-content">∂f/∂t = ∂/∂Jᵢ (Dᵢⱼ ∂f/∂Jⱼ)<br>i,j = 1,2,3</div>
+      </div>
+      <p class="description-text">Phase space density f evolves via diffusion in the three adiabatic invariants (J₁, J₂, J₃), corresponding to gyration, bounce, and azimuthal drift motion.</p>
+    </div>
+
+    <div id="eq2" class="tab-content">
+      <div class="equation-display">
+        <div class="eq-label">Eq.2 — Fokker-Planck (no mixed terms)</div>
+        <div class="eq-content">
+          ∂f/∂t = L*² ∂/∂L*|<sub>μ,J</sub> (D<sub>L*L*</sub> L*⁻² ∂f/∂L*|<sub>μ,J</sub>)<br>
+          + 1/p² ∂/∂p|<sub>y,L</sub> (p² ⟨D<sub>pp</sub>(y,p)⟩<sub>ba</sub> ∂f/∂p|<sub>y,L</sub>)<br>
+          + 1/(T(y)·y) ∂/∂y|<sub>p,L</sub> (T(y)·y·⟨D<sub>yy</sub>(y,p)⟩<sub>ba</sub> ∂f/∂y|<sub>p,L</sub>)<br>
+          − f/τ
+        </div>
+      </div>
+      <p class="description-text">Separates radial diffusion (L*), momentum diffusion (p), and pitch-angle diffusion (y = sin α₀) with bounce-averaged coefficients. D<sub>L*L*</sub> is now time-dependent via Kp(t).</p>
+    </div>
+
+    <div id="eq3" class="tab-content">
+      <div class="equation-display">
+        <div class="eq-label">Eq.3 — Fokker-Planck with Mixed Terms</div>
+        <div class="eq-content">
+          ∂f/∂t = L*² ∂/∂L*|<sub>μ,J</sub> (D<sub>L*L*</sub> L*⁻² ∂f/∂L*|<sub>μ,J</sub>)<br>
+          + 1/p² ∂/∂p|<sub>α₀,L</sub> p²(⟨D<sub>pp</sub>⟩ ∂f/∂p + ⟨D<sub>pα₀</sub>⟩ ∂f/∂α₀)<br>
+          + 1/(T(α₀)sin2α₀) ∂/∂α₀|<sub>p,L</sub> T(α₀)sin2α₀<br>
+          &nbsp;&nbsp;·(⟨D<sub>α₀α₀</sub>⟩ ∂f/∂α₀ + ⟨D<sub>α₀p</sub>⟩ ∂f/∂p) − f/τ
+        </div>
+      </div>
+      <p class="description-text">D<sub>α₀p</sub> is the mixed energy–pitch angle diffusion coefficient. Cross-diffusion terms couple momentum and pitch-angle evolution.</p>
+    </div>
+
+    <div id="eq4" class="tab-content">
+      <div class="equation-display">
+        <div class="eq-label">Bounce Period Factor T(α₀)</div>
+        <div class="eq-content">T(α₀) = 1.3802 − 0.3198·(sin(α₀) + sin²(α₀))</div>
+      </div>
+      <p class="description-text">Approximation for the normalized bounce period (Schulz & Lanzerotti 1974). Particles near the loss cone have T ≈ 1.38; those near 90° have T ≈ 0.74.</p>
+    </div>
+
+    <div id="eq5" class="tab-content">
+      <div class="equation-display">
+        <div class="eq-label">D<sub>L*L*</sub>(Kp) — Brautigam & Albert 2000</div>
+        <div class="eq-content">D<sub>L*L*</sub> = D₀ · 10^(0.506·Kp − 9.325) · L*¹⁰</div>
+      </div>
+      <p class="description-text">Radial diffusion coefficient parameterized by Kp index and L-shell. Higher Kp dramatically increases radial transport, driving inward diffusion and energization during storms. Kp is updated every 3 hours in this simulation.</p>
+    </div>
+  </div>
+
+  <div class="info-card">
+    <h3>Radiation Belt Physics</h3>
+    <p class="description-text">
+      Relativistic electrons (>500 keV) undergo three periodic motions: <strong>gyration</strong> (μ), <strong>bounce</strong> (J), and azimuthal <strong>drift</strong> (Φ = L*). ULF waves drive radial diffusion, chorus waves produce local acceleration, and magnetopause shadowing causes loss on the dayside.
+    </p>
+  </div>
+
+  <div class="info-card">
+    <h3>Magnetic Field Notes</h3>
+    <p class="description-text">
+      The local B-field determines energy from μ. Because electron spectra are steep, small ΔB errors produce large flux errors — especially at high L. At LEO, populations include <strong>Trapped</strong>, <strong>BLC</strong>, and <strong>DLC</strong> electrons requiring accurate magnetic mapping to classify.
+    </p>
+  </div>
+
+</div>
+
+<!-- Bottom Bar -->
+<div class="bottom-bar">
+  <div class="metric">
+    <span class="lbl">L*</span>
+    <span class="val" id="bot-lstar">4.5 R<sub>E</sub></span>
+  </div>
+  <div class="sep"></div>
+  <div class="metric">
+    <span class="lbl">E</span>
+    <span class="val" id="bot-energy">1.0 MeV</span>
+  </div>
+  <div class="sep"></div>
+  <div class="metric">
+    <span class="lbl">α₀</span>
+    <span class="val" id="bot-alpha">45°</span>
+  </div>
+  <div class="sep"></div>
+  <div class="metric">
+    <span class="lbl">Kp(t)</span>
+    <span class="val" id="bot-kp">3.0</span>
+  </div>
+  <div class="sep"></div>
+  <div class="metric">
+    <span class="lbl">D<sub>LL</sub></span>
+    <span class="val" id="bot-dll">1.0e-6</span>
+  </div>
+  <div class="sep"></div>
+  <div class="metric">
+    <span class="lbl">Model</span>
+    <span class="val" id="bot-model">Eq.2</span>
+  </div>
+  <div class="sep"></div>
+  <div class="metric">
+    <span class="lbl">Sim</span>
+    <span class="val" id="bot-simtime">T+0.0h</span>
+  </div>
+</div>
+
+<script>
+// ==================== THREE.JS SETUP ====================
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 200);
+camera.position.set(12, 8, 12);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(0x06080f, 1);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+container.appendChild(renderer.domElement);
+container.appendChild(VRButton.createButton(renderer));
+
+// ── VR Scale: In VR, 1 unit = 1 meter. Earth radius = 1 unit = too small.
+// We add a VR rig group that scales the scene so the user is "inside" the belts.
+const vrRig = new THREE.Group();
+let VR_SCENE_SCALE = 2.0; // 1 R_E = 2 meters in VR
+vrRig.scale.setScalar(VR_SCENE_SCALE);
+scene.add(vrRig);
+// Flag to track VR state
+let isInVR = false;
+renderer.xr.addEventListener('sessionstart', () => { isInVR = true; });
+renderer.xr.addEventListener('sessionend', () => { isInVR = false; });
+
+// ── VR Controllers ────────────────────────────────────────────────
+const controller0 = renderer.xr.getController(0);
+const controller1 = renderer.xr.getController(1);
+scene.add(controller0);
+scene.add(controller1);
+
+// Controller ray visualization
+function buildControllerRay() {
+  const geo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0, 0, -5)
+  ]);
+  const mat = new THREE.LineBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.5 });
+  return new THREE.Line(geo, mat);
+}
+controller0.add(buildControllerRay());
+controller1.add(buildControllerRay());
+
+// VR controller input: squeeze to zoom, trigger to select satellite
+let vrGripPressed = [false, false];
+let vrLastGripDist = 0;
+controller0.addEventListener('selectstart', () => { vrTriggerSelect(controller0); });
+controller1.addEventListener('selectstart', () => { vrTriggerSelect(controller1); });
+controller0.addEventListener('squeezestart', () => { vrGripPressed[0] = true; });
+controller0.addEventListener('squeezeend', () => { vrGripPressed[0] = false; });
+controller1.addEventListener('squeezestart', () => { vrGripPressed[1] = true; });
+controller1.addEventListener('squeezeend', () => { vrGripPressed[1] = false; });
+
+function vrTriggerSelect(controller) {
+  // Raycast from controller into scene for satellite picking
+  const tempMatrix = new THREE.Matrix4();
+  tempMatrix.identity().extractRotation(controller.matrixWorld);
+  const vrRaycaster = new THREE.Raycaster();
+  vrRaycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+  vrRaycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+  vrRaycaster.params.Points = { threshold: 0.3 * VR_SCENE_SCALE };
+
+  const satMeshes = [];
+  orbitGroup.children.forEach(orbit => {
+    orbit.children.forEach(child => {
+      if (child.userData.satName) satMeshes.push(child);
+    });
+  });
+  const intersects = vrRaycaster.intersectObjects(satMeshes, true);
+  if (intersects.length > 0) {
+    let obj = intersects[0].object;
+    while (obj && !obj.userData.satName) obj = obj.parent;
+    if (obj && obj.userData.satName) zoomToSatellite(obj);
+  }
+}
+
+// Raycaster for satellite picking
+const raycaster = new THREE.Raycaster();
+raycaster.params.Points = { threshold: 0.3 };
+const mouse = new THREE.Vector2();
+
+// Lighting
+scene.add(new THREE.AmbientLight(0x2a3456, 0.6));
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+dirLight.position.set(10, 10, 5);
+scene.add(dirLight);
+const pointLight = new THREE.PointLight(0x3b82f6, 0.4, 30);
+pointLight.position.set(-5, 3, -5);
+scene.add(pointLight);
+const sunLight = new THREE.PointLight(0xfff4e6, 0.3, 50);
+sunLight.position.set(20, 5, 0);
+scene.add(sunLight);
+
+// ── VR World-Space Info Panel ─────────────────────────────────────
+// A floating text panel visible in VR, showing key parameters
+const vrInfoCanvas = document.createElement('canvas');
+vrInfoCanvas.width = 512;
+vrInfoCanvas.height = 512;
+const vrInfoCtx = vrInfoCanvas.getContext('2d');
+const vrInfoTexture = new THREE.CanvasTexture(vrInfoCanvas);
+const vrInfoPanel = new THREE.Mesh(
+  new THREE.PlaneGeometry(2.0, 2.0),
+  new THREE.MeshBasicMaterial({ map: vrInfoTexture, transparent: true, side: THREE.DoubleSide, depthWrite: false })
+);
+vrInfoPanel.position.set(-4, 2.5, -6); // Left-forward in VR space
+vrInfoPanel.visible = false; // Only show in VR
+scene.add(vrInfoPanel);
+
+function updateVRInfoPanel() {
+  const ctx = vrInfoCtx;
+  ctx.clearRect(0, 0, 512, 512);
+
+  // Background
+  ctx.fillStyle = 'rgba(6, 8, 15, 0.85)';
+  ctx.beginPath();
+  ctx.roundRect(10, 10, 492, 492, 16);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(34, 211, 238, 0.4)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Title
+  ctx.fillStyle = '#22d3ee';
+  ctx.font = 'bold 22px monospace';
+  ctx.fillText('VAN ALLEN BELTINATOR', 30, 52);
+
+  // Divider
+  ctx.strokeStyle = 'rgba(34, 211, 238, 0.3)';
+  ctx.beginPath(); ctx.moveTo(30, 65); ctx.lineTo(482, 65); ctx.stroke();
+
+  // Values
+  ctx.font = '16px monospace';
+  const lines = [
+    ['L*', `${state.lstar.toFixed(1)} RE`],
+    ['Energy', `${state.energy.toFixed(1)} MeV`],
+    ['Pitch Angle', `${state.alpha.toFixed(0)}°`],
+    ['Kp(t)', `${currentKpValue.toFixed(1)}`],
+    ['D_LL(Kp)', currentDLL ? currentDLL.toExponential(1) : 'N/A'],
+    ['Bounce Factor', computedValues.bounceFactor ? computedValues.bounceFactor.toFixed(4) : 'N/A'],
+    ['PSD', computedValues.psd ? computedValues.psd.toExponential(2) : 'N/A'],
+    ['Flux', computedValues.flux ? computedValues.flux.toExponential(2) : 'N/A'],
+    ['Magnetopause', computedValues.lmp ? computedValues.lmp.toFixed(1) + ' RE' : 'N/A'],
+    ['BLC', computedValues.blc ? computedValues.blc.toFixed(1) + '°' : 'N/A'],
+    ['DLC', computedValues.dlc ? computedValues.dlc.toFixed(1) + '°' : 'N/A'],
+    ['Status', computedValues.status || 'N/A'],
+    ['Sim Time', `T+${simTimeHours.toFixed(1)}h`],
+  ];
+
+  let y = 95;
+  lines.forEach(([label, val]) => {
+    ctx.fillStyle = '#475569';
+    ctx.fillText(label, 30, y);
+    ctx.fillStyle = '#f59e0b';
+    ctx.fillText(val, 260, y);
+    y += 32;
+  });
+
+  // Instructions
+  ctx.fillStyle = '#475569';
+  ctx.font = '13px monospace';
+  ctx.fillText('Trigger: select satellite | Grip: zoom', 30, 485);
+
+  vrInfoTexture.needsUpdate = true;
+}
+
+// Store computed values for VR panel access
+let computedValues = {};
+let simTimeHours_display = 0;
+
+// ==================== STATE ====================
+const state = {
+  lstar: 4.5, energy: 1.0, alpha: 45, dll: -6, dpp: -7, daa: -5, dap: -10, tau: 10,
+  kp: 3, dst: -30, vsw: 400,
+  showBelts: true, showOrbits: true, showField: true, showParticles: true, showLossCone: false, mixedTerms: false
+};
+
+// ==================== KP TIME-DEPENDENT SYSTEM ====================
+let simRunning = true;
+let simSpeed = 60; // 60× real time (1 sim-second = 1 sim-minute)
+let simTimeHours = 0; // elapsed simulation hours
+let kpTimeline = []; // 8 Kp values for 24h (3h cadence)
+let currentKpIndex = 0;
+let currentKpValue = 3;
+let currentDLL = -6;
+
+function generateKpTimeline(baseKp) {
+  // Generate a 24h Kp profile: 8 bins of 3 hours each
+  // Storm-like pattern: ramp up, peak, gradual decay, with noise
+  const timeline = [];
+  for (let i = 0; i < 8; i++) {
+    // Create a storm-like envelope centered around bin 3
+    const stormPhase = Math.exp(-0.5 * Math.pow((i - 3) / 1.8, 2));
+    const stormAmplitude = baseKp * 0.5;
+    const kpVal = Math.max(0, Math.min(9,
+      baseKp + stormAmplitude * stormPhase + (Math.random() - 0.5) * 1.5
+    ));
+    timeline.push(Math.round(kpVal * 10) / 10);
+  }
+  return timeline;
+}
+
+function computeDLL_Kp(kp, L) {
+  // Brautigam & Albert (2000): D_LL = D0 * 10^(0.506*Kp - 9.325) * L^10
+  const logDLL = 0.506 * kp - 9.325 + 10 * Math.log10(Math.max(1, L));
+  return logDLL; // return as log10
+}
+
+function renderKpTimeline() {
+  const container = document.getElementById('kp-timeline');
+  container.innerHTML = '';
+  kpTimeline.forEach((kp, i) => {
+    const bar = document.createElement('div');
+    bar.className = 'kp-bar' + (i === currentKpIndex ? ' current' : '');
+    const h = Math.max(2, (kp / 9) * 18);
+    bar.style.height = h + 'px';
+    if (kp <= 3) bar.style.background = 'var(--accent-green)';
+    else if (kp <= 6) bar.style.background = 'var(--accent-amber)';
+    else bar.style.background = 'var(--accent-red)';
+    bar.title = `${i*3}–${(i+1)*3}h: Kp=${kp.toFixed(1)}`;
+    container.appendChild(bar);
+  });
+}
+
+// Initialize Kp timeline
+kpTimeline = generateKpTimeline(state.kp);
+renderKpTimeline();
+
+// ==================== CAMERA TRACKING SYSTEM ====================
+let camH = 0.7, camV = 0.45, camDist = 16;
+let camTargetH = camH, camTargetV = camV, camTargetDist = camDist;
+let camLookAt = new THREE.Vector3(0, 0, 0);
+let camTargetLookAt = new THREE.Vector3(0, 0, 0);
+let trackingSatellite = null; // reference to tracked satellite dot mesh
+let isZoomedOnSat = false;
+const CAM_LERP = 0.04;
+
+function zoomToSatellite(satDot) {
+  trackingSatellite = satDot;
+  isZoomedOnSat = true;
+  camTargetDist = 3.5;
+  document.getElementById('zoom-back-btn').classList.add('visible');
+
+  // Show tooltip
+  const info = getSatelliteInfo(satDot.userData.satName);
+  document.getElementById('sat-tooltip-name').textContent = info.name;
+  document.getElementById('sat-tooltip-detail').innerHTML = info.detail;
+  document.getElementById('sat-tooltip').classList.add('visible');
+}
+
+function zoomBackToOverview() {
+  trackingSatellite = null;
+  isZoomedOnSat = false;
+  camTargetDist = 16;
+  camTargetLookAt.set(0, 0, 0);
+  document.getElementById('zoom-back-btn').classList.remove('visible');
+  document.getElementById('sat-tooltip').classList.remove('visible');
+}
+
+function focusSatByName(name) {
+  // Find satellite dot by name
+  orbitGroup.children.forEach(orbit => {
+    orbit.children.forEach(child => {
+      if (child.userData.satName === name) {
+        zoomToSatellite(child);
+      }
+    });
+  });
+}
+
+function getSatelliteInfo(name) {
+  const infos = {
+    'RBSP':     { name: 'Van Allen Probes (RBSP A/B)', detail: 'Orbit: ~600 km × 5.8 R<sub>E</sub> (HEO)<br>Inc: 10°<br>Mission: Radiation belt dynamics<br>Instruments: REPT, MagEIS, EMFISIS' },
+    'THEMIS-A': { name: 'THEMIS-A', detail: 'Orbit: ~1.5 × 12 R<sub>E</sub><br>Inc: ~5°<br>Mission: Substorm onset physics<br>Instruments: SST, ESA, FGM' },
+    'THEMIS-D': { name: 'THEMIS-D', detail: 'Orbit: ~2 × 12 R<sub>E</sub><br>Inc: ~8°<br>Constellation member for multi-point measurements' },
+    'THEMIS-E': { name: 'THEMIS-E', detail: 'Orbit: ~2.5 × 12 R<sub>E</sub><br>Inc: ~6°<br>Outer magnetosphere monitor' },
+    'GOES':     { name: 'GOES (Geostationary)', detail: 'Orbit: 6.6 R<sub>E</sub> (GEO)<br>Inc: 0°<br>SEISS &amp; MAG instruments<br>Continuous radiation monitoring' },
+    'LEO':      { name: 'LEO Constellation', detail: 'Orbit: ~400–800 km altitude<br>Inc: ~80°<br>Samples trapped + loss cone<br>BLC/DLC classification critical' },
+    'Lomonosov':{ name: 'Lomonosov', detail: 'Orbit: ~490 km (SSO)<br>Inc: 98°<br>Mission: Multi-messenger astrophysics<br>Electron/gamma measurements' }
+  };
+  return infos[name] || { name: name, detail: '' };
+}
+
+// ==================== EARTH ====================
+const earthGeo = new THREE.SphereGeometry(1, 64, 64);
+const earthMat = new THREE.MeshPhongMaterial({ color: 0x1565c0, emissive: 0x0d47a1, emissiveIntensity: 0.12, shininess: 25 });
+const earth = new THREE.Mesh(earthGeo, earthMat);
+scene.add(earth);
+
+const gridMat = new THREE.LineBasicMaterial({ color: 0x42a5f5, transparent: true, opacity: 0.15 });
+for (let i = 0; i < 12; i++) {
+  const angle = (i / 12) * Math.PI * 2;
+  const pts = [];
+  for (let j = 0; j <= 64; j++) {
+    const phi = (j / 64) * Math.PI * 2;
+    pts.push(new THREE.Vector3(1.005 * Math.cos(phi) * Math.cos(angle), 1.005 * Math.sin(phi), 1.005 * Math.cos(phi) * Math.sin(angle)));
+  }
+  earth.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), gridMat));
+}
+for (let lat = -60; lat <= 60; lat += 30) {
+  const r = Math.cos(lat * Math.PI / 180) * 1.006;
+  const y = Math.sin(lat * Math.PI / 180) * 1.006;
+  const pts = [];
+  for (let j = 0; j <= 64; j++) {
+    const phi = (j / 64) * Math.PI * 2;
+    pts.push(new THREE.Vector3(r * Math.cos(phi), y, r * Math.sin(phi)));
+  }
+  earth.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), gridMat));
+}
+
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(1.1, 32, 32), new THREE.MeshBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.06, side: THREE.BackSide })));
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(1.15, 32, 32), new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.03, side: THREE.BackSide })));
+
+// ==================== RADIATION BELTS ====================
+const beltGroup = new THREE.Group();
+scene.add(beltGroup);
+
+function createBelt(innerR, outerR, height, color, opacity) {
+  const geo = new THREE.TorusGeometry((innerR + outerR) / 2, (outerR - innerR) / 2, 32, 64);
+  const mat = new THREE.MeshPhongMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = Math.PI / 2;
+  mesh.scale.y = height;
+  return mesh;
+}
+
+function buildBelts() {
+  beltGroup.clear();
+  const kpNow = currentKpValue;
+  const kpScale = 1 + kpNow * 0.07;
+  const si = Math.min(1, kpNow / 9);
+
+  beltGroup.add(createBelt(1.5, 2.5, 0.45, 0xef4444, 0.1 + si * 0.05));
+  beltGroup.add(createBelt(1.7, 2.2, 0.3, 0xff6f00, 0.15 + si * 0.05));
+  beltGroup.add(createBelt(2.4, 3.1, 0.25, 0x1a237e, 0.04));
+  beltGroup.add(createBelt(3.0 * kpScale, 6.0 * kpScale, 0.65, 0x3b82f6, 0.08 + si * 0.06));
+  beltGroup.add(createBelt(3.5 * kpScale, 5.0 * kpScale, 0.45, 0x22d3ee, 0.12 + si * 0.06));
+  beltGroup.add(createBelt(4.0 * kpScale, 4.8 * kpScale, 0.3, 0xfdd835, 0.12 + si * 0.08));
+  if (kpNow >= 5) beltGroup.add(createBelt(2.8, 3.5, 0.5, 0xef4444, si * 0.1));
+}
+buildBelts();
+
+// ==================== MAGNETIC FIELD LINES ====================
+const fieldGroup = new THREE.Group();
+scene.add(fieldGroup);
+
+function dipoleFieldLine(L, nPts, color) {
+  const pts = [];
+  for (let i = 0; i <= nPts; i++) {
+    const theta = (i / nPts) * Math.PI;
+    const r = L * Math.sin(theta) * Math.sin(theta);
+    pts.push(new THREE.Vector3(r * Math.sin(theta), r * Math.cos(theta), 0));
+  }
+  return new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.2 }));
+}
+
+function buildFieldLines() {
+  fieldGroup.clear();
+  [2, 3, 4, 5, 6, 7, 8].forEach(L => {
+    for (let m = 0; m < 8; m++) {
+      const line = dipoleFieldLine(L, 60, 0x3b82f6);
+      line.rotation.y = (m / 8) * Math.PI * 2;
+      fieldGroup.add(line);
+    }
+  });
+}
+buildFieldLines();
+
+// ==================== L-SHELL INDICATOR ====================
+const lshellGroup = new THREE.Group();
+scene.add(lshellGroup);
+
+function buildLshell() {
+  lshellGroup.clear();
+  const L = state.lstar;
+  const pts = [];
+  for (let i = 0; i <= 128; i++) {
+    const a = (i / 128) * Math.PI * 2;
+    pts.push(new THREE.Vector3(L * Math.cos(a), 0, L * Math.sin(a)));
+  }
+  lshellGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.65 })));
+  for (let m = 0; m < 4; m++) {
+    const line = dipoleFieldLine(L, 80, 0xf59e0b);
+    line.material.opacity = 0.45;
+    line.rotation.y = (m / 4) * Math.PI * 2;
+    lshellGroup.add(line);
+  }
+
+  const alphaRad = state.alpha * Math.PI / 180;
+  const thetaMirror = Math.asin(Math.pow(Math.sin(alphaRad), 1/3));
+  if (thetaMirror && isFinite(thetaMirror)) {
+    const rMirror = L * Math.sin(thetaMirror) * Math.sin(thetaMirror);
+    const mirrorGeo = new THREE.SphereGeometry(0.08, 8, 8);
+    const mirrorMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+    for (let m = 0; m < 4; m++) {
+      const angle = (m / 4) * Math.PI * 2;
+      const xm = rMirror * Math.sin(thetaMirror);
+      const ym = rMirror * Math.cos(thetaMirror);
+      const dotN = new THREE.Mesh(mirrorGeo, mirrorMat);
+      dotN.position.set(xm * Math.cos(angle), ym, xm * Math.sin(angle));
+      lshellGroup.add(dotN);
+      const dotS = new THREE.Mesh(mirrorGeo, mirrorMat);
+      dotS.position.set(xm * Math.cos(angle), -ym, xm * Math.sin(angle));
+      lshellGroup.add(dotS);
+    }
+  }
+}
+buildLshell();
+
+// ==================== SATELLITE ORBITS ====================
+const orbitGroup = new THREE.Group();
+scene.add(orbitGroup);
+const allSatDots = []; // flat list of all satellite dot meshes for raycasting
+
+function createOrbit(semiMajor, ecc, inc, color, name) {
+  const pts = [];
+  for (let i = 0; i <= 128; i++) {
+    const theta = (i / 128) * Math.PI * 2;
+    const r = semiMajor * (1 - ecc * ecc) / (1 + ecc * Math.cos(theta));
+    const x = r * Math.cos(theta);
+    const z = r * Math.sin(theta);
+    const incRad = inc * Math.PI / 180;
+    pts.push(new THREE.Vector3(x, z * Math.sin(incRad), z * Math.cos(incRad)));
+  }
+  const line = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.5 })
+  );
+  line.userData.satName = name;
+
+  // Larger hit-target sphere (invisible) + visible dot
+  const dotGeo = new THREE.SphereGeometry(0.1, 12, 12);
+  const dot = new THREE.Mesh(dotGeo, new THREE.MeshBasicMaterial({ color }));
+  dot.userData = { orbitRadius: semiMajor, eccentricity: ecc, inclination: inc, phase: Math.random() * Math.PI * 2, speed: 0.25 / semiMajor, satName: name, satColor: color };
+
+  // Invisible hit sphere (bigger for easier clicking)
+  const hitGeo = new THREE.SphereGeometry(0.35, 8, 8);
+  const hitMat = new THREE.MeshBasicMaterial({ visible: false });
+  const hitSphere = new THREE.Mesh(hitGeo, hitMat);
+  hitSphere.userData = { isSatHitbox: true, satDot: dot, satName: name };
+  dot.add(hitSphere);
+
+  // Glow ring around satellite
+  const ringGeo = new THREE.RingGeometry(0.15, 0.22, 16);
+  const ringMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.lookAt(camera.position);
+  dot.add(ring);
+  dot.userData.ring = ring;
+
+  // Name label sprite
+  const canvas = document.createElement('canvas');
+  canvas.width = 256; canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  ctx.font = 'bold 28px monospace';
+  ctx.fillStyle = '#' + new THREE.Color(color).getHexString();
+  ctx.fillText(name, 4, 36);
+  const tex = new THREE.CanvasTexture(canvas);
+  const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.8, depthWrite: false });
+  const sprite = new THREE.Sprite(spriteMat);
+  sprite.scale.set(1.2, 0.3, 1);
+  sprite.position.y = 0.35;
+  dot.add(sprite);
+
+  line.add(dot);
+  allSatDots.push(dot);
+  return line;
+}
+
+function buildOrbits() {
+  orbitGroup.clear();
+  allSatDots.length = 0;
+  orbitGroup.add(createOrbit(3.3, 0.67, 10, 0xef4444, 'RBSP'));
+  orbitGroup.add(createOrbit(5.5, 0.35, 5, 0x3b82f6, 'THEMIS-A'));
+  orbitGroup.add(createOrbit(7.0, 0.4, 8, 0x3b82f6, 'THEMIS-D'));
+  orbitGroup.add(createOrbit(8.5, 0.45, 6, 0x3b82f6, 'THEMIS-E'));
+  orbitGroup.add(createOrbit(6.6, 0.0, 0, 0x10b981, 'GOES'));
+  orbitGroup.add(createOrbit(1.12, 0.0, 80, 0xf59e0b, 'LEO'));
+  orbitGroup.add(createOrbit(1.15, 0.0, 98, 0xa855f7, 'Lomonosov'));
+}
+buildOrbits();
+
+// ==================== PARTICLES ====================
+const particleGroup = new THREE.Group();
+scene.add(particleGroup);
+
+const NUM_PARTICLES = 350;
+const pPos = new Float32Array(NUM_PARTICLES * 3);
+const pCol = new Float32Array(NUM_PARTICLES * 3);
+const pMeta = [];
+
+for (let i = 0; i < NUM_PARTICLES; i++) {
+  const L = 1.5 + Math.random() * 6;
+  const phi = Math.random() * Math.PI * 2;
+  const theta = (Math.random() - 0.5) * 0.8;
+  pMeta.push({ L, phi, theta, gyroPhase: Math.random() * Math.PI * 2, bouncePhase: Math.random() * Math.PI * 2, driftSpeed: 0.15 + Math.random() * 0.35, bounceSpeed: 0.4 + Math.random() * 1.2, gyroRadius: 0.015 + Math.random() * 0.04 });
+  const idx = i * 3;
+  pPos[idx] = L * Math.cos(phi); pPos[idx+1] = theta; pPos[idx+2] = L * Math.sin(phi);
+  const t = (L - 1.5) / 6;
+  pCol[idx] = 0.15 + t * 0.85; pCol[idx+1] = 0.8 - t * 0.55; pCol[idx+2] = 1.0 - t * 0.75;
+}
+
+const pGeo = new THREE.BufferGeometry();
+pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3));
+particleGroup.add(new THREE.Points(pGeo, new THREE.PointsMaterial({ size: 0.055, vertexColors: true, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false })));
+
+// ==================== LOSS CONE ====================
+const lossConeGroup = new THREE.Group();
+scene.add(lossConeGroup);
+lossConeGroup.visible = false;
+
+function buildLossCone() {
+  lossConeGroup.clear();
+  const coneAngle = Math.asin(Math.sqrt(1 / (state.lstar ** 3)));
+  const h = 3, r = Math.tan(coneAngle) * h;
+  const coneGeo = new THREE.ConeGeometry(r, h, 32, 1, true);
+  const coneMat = new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false });
+  const cN = new THREE.Mesh(coneGeo, coneMat); cN.position.y = h/2; lossConeGroup.add(cN);
+  const cS = new THREE.Mesh(coneGeo.clone(), coneMat.clone()); cS.position.y = -h/2; cS.rotation.x = Math.PI; lossConeGroup.add(cS);
+}
+
+// ==================== STARS ====================
+const starPos = new Float32Array(4000 * 3);
+for (let i = 0; i < 4000 * 3; i++) starPos[i] = (Math.random() - 0.5) * 160;
+scene.add(new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(starPos, 3)) || new THREE.BufferGeometry(), new THREE.PointsMaterial({ color: 0xffffff, size: 0.08, transparent: true, opacity: 0.5 })));
+
+// Fix: create star geometry properly
+const starGeo2 = new THREE.BufferGeometry();
+starGeo2.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+// already added via Points above, but let's ensure it's correct
+
+// ==================== MOUSE / TOUCH CONTROLS ====================
+let isDragging = false, prevMousePos = { x: 0, y: 0 }, mouseDownTime = 0;
+
+renderer.domElement.addEventListener('mousedown', e => {
+  mouseDownTime = performance.now();
+  if (e.clientX > 330 && e.clientX < window.innerWidth - 360) {
+    isDragging = true;
+    prevMousePos = { x: e.clientX, y: e.clientY };
+    container.classList.add('grabbing');
+  }
+});
+
+window.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  if (!isZoomedOnSat) {
+    camH += (e.clientX - prevMousePos.x) * 0.005;
+    camV = Math.max(-1.2, Math.min(1.2, camV + (e.clientY - prevMousePos.y) * 0.005));
+    camTargetH = camH; camTargetV = camV;
+  }
+  prevMousePos = { x: e.clientX, y: e.clientY };
+});
+
+window.addEventListener('mouseup', e => {
+  isDragging = false;
+  container.classList.remove('grabbing');
+
+  // Click detection (short press = click, not drag)
+  const elapsed = performance.now() - mouseDownTime;
+  if (elapsed < 250) {
+    handleClick(e);
+  }
+});
+
+renderer.domElement.addEventListener('wheel', e => {
+  if (isZoomedOnSat) {
+    camTargetDist = Math.max(1.5, Math.min(10, camTargetDist + e.deltaY * 0.005));
+  } else {
+    camDist = Math.max(4, Math.min(40, camDist + e.deltaY * 0.01));
+    camTargetDist = camDist;
+  }
+  e.preventDefault();
+}, { passive: false });
+
+// Touch support
+let touchStart = null;
+renderer.domElement.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY, time: performance.now() };
+});
+renderer.domElement.addEventListener('touchmove', e => {
+  if (!touchStart || e.touches.length !== 1) return;
+  if (!isZoomedOnSat) {
+    camH += (e.touches[0].clientX - touchStart.x) * 0.005;
+    camV = Math.max(-1.2, Math.min(1.2, camV + (e.touches[0].clientY - touchStart.y) * 0.005));
+    camTargetH = camH; camTargetV = camV;
+  }
+  touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY, time: touchStart.time };
+  e.preventDefault();
+}, { passive: false });
+renderer.domElement.addEventListener('touchend', e => {
+  if (touchStart && (performance.now() - touchStart.time) < 300) {
+    // Simulate click at touch position
+    handleClick({ clientX: touchStart.x, clientY: touchStart.y });
+  }
+  touchStart = null;
+});
+
+// ==================== CLICK HANDLER (RAYCASTING) ====================
+function handleClick(e) {
+  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+
+  // Collect all satellite hit spheres
+  const hitTargets = [];
+  allSatDots.forEach(dot => {
+    dot.children.forEach(child => {
+      if (child.userData.isSatHitbox) {
+        hitTargets.push(child);
+      }
+    });
+  });
+
+  const intersects = raycaster.intersectObjects(hitTargets, false);
+  if (intersects.length > 0) {
+    const hit = intersects[0].object;
+    const satDot = hit.userData.satDot;
+    zoomToSatellite(satDot);
+  }
+}
+
+// ==================== PHYSICS COMPUTATIONS ====================
+function computeBounce(a0) {
+  const a = a0 * Math.PI / 180;
+  return 1.3802 - 0.3198 * (Math.sin(a) + Math.sin(a) * Math.sin(a));
+}
+
+function computePSD(L, E, a0, Kp) {
+  const baseFlux = 1e6 * Math.exp(-E / 0.5) * Math.exp(-((L - 4.5) ** 2) / 4);
+  const stormFactor = 1 + Kp * 0.5;
+  const pitchFactor = Math.sin(a0 * Math.PI / 180) ** 2;
+  return baseFlux * stormFactor * pitchFactor * 1e-16;
+}
+
+function computeFlux(psd, E) { return psd * E * (E + 2 * 0.511) * 1e6; }
+function computeLmp(Dst, Vsw) { return 11.4 + 0.013 * (-5) - 0.000015 * Math.abs(Dst); }
+function computeBLC(L) { return Math.asin(Math.sqrt(1 / (L ** 3))) * 180 / Math.PI; }
+function computeDLC(L) { return computeBLC(L) * 1.6; }
+
+function updateStormIndicator() {
+  const el = document.getElementById('storm-indicator');
+  const label = document.getElementById('storm-label');
+  const kp = currentKpValue;
+  el.classList.remove('quiet', 'moderate', 'intense');
+  if (kp <= 3) { el.classList.add('quiet'); label.textContent = 'Quiet Conditions'; }
+  else if (kp <= 6) { el.classList.add('moderate'); label.textContent = 'Moderate Storm (G' + Math.min(3, Math.round(kp) - 3) + ')'; }
+  else { el.classList.add('intense'); label.textContent = 'Intense Storm (G' + Math.min(5, Math.round(kp) - 3) + ')'; }
+}
+
+function updateComputedValues() {
+  const T = computeBounce(state.alpha);
+  const kpNow = currentKpValue;
+  const psd = computePSD(state.lstar, state.energy, state.alpha, kpNow);
+  const flux = computeFlux(psd, state.energy);
+  const Lmp = computeLmp(state.dst, state.vsw);
+  const lcds = Lmp * 0.76;
+  const blc = computeBLC(state.lstar);
+  const dlc = computeDLC(state.lstar);
+  const dllLog = computeDLL_Kp(kpNow, state.lstar);
+  const dllVal = Math.pow(10, dllLog);
+
+  document.getElementById('bounce-val').textContent = T.toFixed(4);
+  document.getElementById('psd-val').textContent = psd.toExponential(2);
+  document.getElementById('flux-val').textContent = flux.toExponential(2);
+  document.getElementById('dll-live').textContent = dllVal.toExponential(2);
+  document.getElementById('dll-val').innerHTML = dllVal.toExponential(1) + ' ⟲';
+  document.getElementById('kp-current-val').textContent = kpNow.toFixed(1);
+  document.getElementById('lmp-val').innerHTML = Lmp.toFixed(1) + ' R<sub>E</sub>';
+  document.getElementById('lcds-val').innerHTML = lcds.toFixed(1) + ' R<sub>E</sub>';
+  document.getElementById('blc-val').textContent = blc.toFixed(1) + '°';
+  document.getElementById('dlc-val').textContent = dlc.toFixed(1) + '°';
+
+  const statusEl = document.getElementById('trap-status');
+  if (state.alpha < blc) { statusEl.textContent = 'BLC (Precipitating)'; statusEl.className = 'val danger'; }
+  else if (state.alpha < dlc) { statusEl.textContent = 'Drift Loss Cone'; statusEl.className = 'val warn'; }
+  else { statusEl.textContent = 'Stably Trapped'; statusEl.className = 'val safe'; }
+
+  const fluxEl = document.getElementById('flux-val');
+  if (flux > 1e6) fluxEl.className = 'val danger';
+  else if (flux > 1e4) fluxEl.className = 'val warn';
+  else fluxEl.className = 'val';
+
+  document.getElementById('bot-lstar').innerHTML = state.lstar.toFixed(1) + ' R<sub>E</sub>';
+  document.getElementById('bot-energy').textContent = state.energy.toFixed(1) + ' MeV';
+  document.getElementById('bot-alpha').textContent = state.alpha + '°';
+  document.getElementById('bot-kp').textContent = kpNow.toFixed(1);
+  document.getElementById('bot-dll').textContent = dllVal.toExponential(1);
+  document.getElementById('bot-model').textContent = state.mixedTerms ? 'Eq.3' : 'Eq.2';
+  document.getElementById('bot-simtime').textContent = 'T+' + simTimeHours.toFixed(1) + 'h';
+  document.getElementById('sim-time-display').textContent = 'T+' + simTimeHours.toFixed(1) + 'h';
+
+  updateStormIndicator();
+
+  // Store for VR panel access
+  computedValues = { bounceFactor: T, psd, flux, lmp: Lmp, lcds, blc, dlc, dllVal, status:
+    state.alpha < blc ? 'BLC (Precipitating)' : state.alpha < dlc ? 'Drift Loss Cone' : 'Stably Trapped'
+  };
+
+  // Update VR floating panel
+  if (isInVR) {
+    vrInfoPanel.visible = true;
+    updateVRInfoPanel();
+    // Make panel face the camera
+    vrInfoPanel.lookAt(camera.position);
+  } else {
+    vrInfoPanel.visible = false;
+  }
+}
+
+// ==================== SLIDER BINDINGS ====================
+function bindSlider(id, key, dispId, fmt) {
+  document.getElementById(id).addEventListener('input', function() {
+    state[key] = parseFloat(this.value);
+    document.getElementById(dispId).textContent = fmt ? fmt(state[key]) : state[key];
+    onStateChange();
+  });
+}
+
+bindSlider('lstar', 'lstar', 'lstar-val');
+bindSlider('energy', 'energy', 'energy-val', v => v.toFixed(1));
+bindSlider('alpha', 'alpha', 'alpha-val');
+bindSlider('dpp', 'dpp', 'dpp-val', v => Math.pow(10, v).toExponential(1));
+bindSlider('daa', 'daa', 'daa-val', v => Math.pow(10, v).toExponential(1));
+bindSlider('dap', 'dap', 'dap-val', v => state.mixedTerms ? Math.pow(10, v).toExponential(1) : '0 (off)');
+bindSlider('tau', 'tau', 'tau-val', v => v.toFixed(1));
+bindSlider('dst', 'dst', 'dst-val');
+bindSlider('vsw', 'vsw', 'vsw-val');
+
+// Kp baseline drives timeline regeneration
+document.getElementById('kp').addEventListener('input', function() {
+  state.kp = parseFloat(this.value);
+  document.getElementById('kp-val').textContent = state.kp;
+  kpTimeline = generateKpTimeline(state.kp);
+  renderKpTimeline();
+  onStateChange();
+});
+
+document.getElementById('sim-speed').addEventListener('input', function() {
+  simSpeed = parseFloat(this.value);
+  document.getElementById('sim-speed-val').textContent = simSpeed;
+});
+
+// Toggle bindings
+document.getElementById('show-belts').addEventListener('change', e => { state.showBelts = e.target.checked; onStateChange(); });
+document.getElementById('show-orbits').addEventListener('change', e => { state.showOrbits = e.target.checked; onStateChange(); });
+document.getElementById('show-field').addEventListener('change', e => { state.showField = e.target.checked; onStateChange(); });
+document.getElementById('show-particles').addEventListener('change', e => { state.showParticles = e.target.checked; onStateChange(); });
+document.getElementById('show-loss-cone').addEventListener('change', e => { state.showLossCone = e.target.checked; onStateChange(); });
+document.getElementById('sim-running').addEventListener('change', e => { simRunning = e.target.checked; });
+document.getElementById('mixed-terms').addEventListener('change', e => {
+  state.mixedTerms = e.target.checked;
+  document.getElementById('dap').disabled = !e.target.checked;
+  document.getElementById('dap-val').textContent = e.target.checked ? Math.pow(10, state.dap).toExponential(1) : '0 (off)';
+  onStateChange();
+});
+
+function onStateChange() {
+  buildBelts();
+  buildLshell();
+  buildLossCone();
+  updateComputedValues();
+  beltGroup.visible = state.showBelts;
+  orbitGroup.visible = state.showOrbits;
+  fieldGroup.visible = state.showField;
+  particleGroup.visible = state.showParticles;
+  lossConeGroup.visible = state.showLossCone;
+}
+
+// ==================== PRESETS ====================
+function applyPreset(name, btn) {
+  document.querySelectorAll('.btn-group .btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+
+  const presets = {
+    quiet:    { kp: 1, dst: -10, vsw: 350, dpp: -8, daa: -6, tau: 20 },
+    moderate: { kp: 4, dst: -80, vsw: 500, dpp: -6.5, daa: -4.5, tau: 8 },
+    intense:  { kp: 8, dst: -250, vsw: 800, dpp: -5, daa: -3, tau: 2 },
+    recovery: { kp: 2, dst: -40, vsw: 400, dpp: -7.5, daa: -5.5, tau: 15 }
+  };
+
+  const p = presets[name];
+  Object.entries(p).forEach(([k, v]) => {
+    state[k] = v;
+    const el = document.getElementById(k);
+    if (el) el.value = v;
+  });
+
+  kpTimeline = generateKpTimeline(state.kp);
+  renderKpTimeline();
+
+  document.getElementById('kp-val').textContent = state.kp;
+  document.getElementById('dst-val').textContent = state.dst;
+  document.getElementById('vsw-val').textContent = state.vsw;
+  document.getElementById('dpp-val').textContent = Math.pow(10, state.dpp).toExponential(1);
+  document.getElementById('daa-val').textContent = Math.pow(10, state.daa).toExponential(1);
+  document.getElementById('tau-val').textContent = state.tau.toFixed(1);
+
+  onStateChange();
+}
+
+// ==================== TABS ====================
+function showTab(id, btn) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+
+// ==================== ANIMATION ====================
+const clock = new THREE.Clock();
+let prevKpIndex = -1;
+
+function animate() {
+  // Note: When in VR, renderer.setAnimationLoop handles the loop.
+  // When not in VR, we use requestAnimationFrame as fallback.
+  const dt = clock.getDelta();
+  const time = clock.getElapsedTime();
+
+  // ---- Kp TIME SIMULATION ----
+  if (simRunning) {
+    // dt is real seconds; simSpeed converts to sim-hours
+    simTimeHours += dt * simSpeed / 3600 * 60; // simSpeed=60 → 1 real sec = 1 sim minute
+    if (simTimeHours >= 24) {
+      simTimeHours -= 24;
+      kpTimeline = generateKpTimeline(state.kp); // regenerate each 24h cycle
+    }
+
+    // Determine current 3-hour bin
+    currentKpIndex = Math.min(7, Math.floor(simTimeHours / 3));
+    const nextIndex = Math.min(7, currentKpIndex + 1);
+    const fracInBin = (simTimeHours / 3) - currentKpIndex;
+
+    // Smooth interpolation between Kp bins
+    currentKpValue = kpTimeline[currentKpIndex] * (1 - fracInBin) + kpTimeline[nextIndex === 8 ? 0 : nextIndex] * fracInBin;
+
+    // Update DLL from Kp
+    currentDLL = computeDLL_Kp(currentKpValue, state.lstar);
+
+    // Rebuild belts periodically when Kp bin changes
+    if (currentKpIndex !== prevKpIndex) {
+      prevKpIndex = currentKpIndex;
+      renderKpTimeline();
+      buildBelts();
+    }
+
+    // Continuously update computed values
+    updateComputedValues();
+  }
+
+  // ---- MAGNETIC OSCILLATION ----
+  // Driven by currentKpValue: belts oscillate, field lines sway
+  const kpNorm = currentKpValue / 9;
+  const magOscFreq = 0.3 + kpNorm * 0.8; // faster oscillation during storms
+  const magOscAmp = 0.01 + kpNorm * 0.04; // larger amplitude during storms
+
+  // Belt breathing driven by magnetic oscillation
+  if (beltGroup.children.length > 0) {
+    const osc = 1 + magOscAmp * Math.sin(time * magOscFreq * Math.PI * 2);
+    const vertOsc = 1 + magOscAmp * 0.5 * Math.sin(time * magOscFreq * 1.3 * Math.PI * 2 + 0.5);
+    beltGroup.children.forEach((c, i) => {
+      const phase = i * 0.3;
+      const localOsc = osc + 0.005 * Math.sin(time * 1.1 + phase);
+      c.scale.x = localOsc;
+      c.scale.z = localOsc;
+      c.scale.y = c.scale.y * 0.97 + (c.scale.y * vertOsc) * 0.03; // smooth vertical
+    });
+  }
+
+  // Field line sway (subtle tilt during storms)
+  if (fieldGroup.visible) {
+    const tilt = kpNorm * 0.03 * Math.sin(time * magOscFreq * Math.PI);
+    fieldGroup.rotation.x = tilt;
+    fieldGroup.rotation.z = tilt * 0.5 * Math.sin(time * 0.2);
+  }
+
+  // ---- CAMERA ----
+  if (isZoomedOnSat && trackingSatellite) {
+    // Get world position of tracked satellite
+    const worldPos = new THREE.Vector3();
+    trackingSatellite.getWorldPosition(worldPos);
+    camTargetLookAt.copy(worldPos);
+
+    // Position camera offset from satellite
+    const offset = worldPos.clone().normalize().multiplyScalar(camTargetDist);
+    offset.y += camTargetDist * 0.3;
+    const targetCamPos = worldPos.clone().add(offset);
+
+    camera.position.lerp(targetCamPos, CAM_LERP * 2);
+    camLookAt.lerp(camTargetLookAt, CAM_LERP * 2);
+    camera.lookAt(camLookAt);
+
+    // Update tooltip position
+    const screenPos = worldPos.clone().project(camera);
+    const tooltip = document.getElementById('sat-tooltip');
+    const sx = (screenPos.x * 0.5 + 0.5) * window.innerWidth;
+    const sy = (-screenPos.y * 0.5 + 0.5) * window.innerHeight;
+    tooltip.style.left = Math.min(sx + 30, window.innerWidth - 250) + 'px';
+    tooltip.style.top = Math.max(sy - 60, 70) + 'px';
+  } else {
+    if (!isDragging) camH += 0.0008;
+    camTargetH = camH; camTargetV = camV;
+    const targetPos = new THREE.Vector3(
+      camTargetDist * Math.cos(camV) * Math.cos(camH),
+      camTargetDist * Math.sin(camV),
+      camTargetDist * Math.cos(camV) * Math.sin(camH)
+    );
+    camera.position.lerp(targetPos, 0.08);
+    camLookAt.lerp(camTargetLookAt, 0.08);
+    camera.lookAt(camLookAt);
+    camDist += (camTargetDist - camDist) * 0.08;
+  }
+
+  // ---- EARTH ROTATION ----
+  earth.rotation.y += 0.0015;
+
+  // ---- SATELLITE MOTION ----
+  orbitGroup.children.forEach(orbit => {
+    orbit.children.forEach(child => {
+      if (child.userData.orbitRadius) {
+        child.userData.phase += child.userData.speed * dt;
+        const ph = child.userData.phase;
+        const ecc = child.userData.eccentricity;
+        const r = child.userData.orbitRadius * (1 - ecc * ecc) / (1 + ecc * Math.cos(ph));
+        const inc = child.userData.inclination * Math.PI / 180;
+        child.position.set(r * Math.cos(ph), r * Math.sin(ph) * Math.sin(inc), r * Math.sin(ph) * Math.cos(inc));
+
+        // Billboard the ring
+        if (child.userData.ring) child.userData.ring.lookAt(camera.position);
+      }
+    });
+  });
+
+  // ---- PARTICLE ANIMATION ----
+  if (state.showParticles && particleGroup.children.length > 0) {
+    const pos = particleGroup.children[0].geometry.attributes.position.array;
+    const colors = particleGroup.children[0].geometry.attributes.color.array;
+    const stormBoost = 1 + currentKpValue * 0.12;
+    const radialPush = kpNorm * 0.002; // storm drives radial transport
+
+    for (let i = 0; i < NUM_PARTICLES; i++) {
+      const p = pMeta[i];
+      p.phi += p.driftSpeed * dt * stormBoost;
+      p.bouncePhase += p.bounceSpeed * dt * (1 + kpNorm * 0.3);
+      p.gyroPhase += 5.0 * dt;
+
+      // Magnetic oscillation affects particle L-shell slightly
+      p.L += radialPush * Math.sin(time * magOscFreq * Math.PI * 2 + p.phi) * dt;
+      p.L = Math.max(1.2, Math.min(8.5, p.L));
+
+      const r = p.L * Math.sin(Math.PI / 2 + p.theta) ** 2;
+      const bounce = Math.sin(p.bouncePhase) * 0.4 * (1 / p.L);
+      const g = p.gyroRadius;
+      const idx = i * 3;
+      pos[idx] = (r + g * Math.cos(p.gyroPhase)) * Math.cos(p.phi);
+      pos[idx + 1] = bounce + g * Math.sin(p.gyroPhase) * 0.3;
+      pos[idx + 2] = (r + g * Math.cos(p.gyroPhase)) * Math.sin(p.phi);
+
+      // Color shift during storms: particles near injection get brighter
+      if (kpNorm > 0.4) {
+        const injection = Math.max(0, 1 - Math.abs(p.L - 4.5) / 2) * kpNorm;
+        colors[idx] = Math.min(1, 0.15 + (p.L - 1.5) / 6 * 0.85 + injection * 0.3);
+        colors[idx + 1] = Math.max(0.1, 0.8 - (p.L - 1.5) / 6 * 0.55 - injection * 0.2);
+      }
+    }
+    particleGroup.children[0].geometry.attributes.position.needsUpdate = true;
+    particleGroup.children[0].geometry.attributes.color.needsUpdate = true;
+  }
+
+  // ── IGLOO CUBEMAP RENDERING ──
+  if (iglooMode && cubeCamera) {
+    cubeCamera.position.copy(camera.position);
+    cubeCamera.update(renderer, scene);
+    // The 6 cubemap faces are in cubeRenderTarget.texture
+    extractCubeFaces(); // copy faces to preview canvases (captureStream-able for NDI/Spout)
+    renderEquirect();  // update equirect canvas for IGLOO NDI stream
+  }
+
+  // ── VR GRIP ZOOM (pinch controllers together/apart) ──
+  if (isInVR && vrGripPressed[0] && vrGripPressed[1]) {
+    const d = controller0.position.distanceTo(controller1.position);
+    if (vrLastGripDist > 0) {
+      const delta = d - vrLastGripDist;
+      VR_SCENE_SCALE = Math.max(0.5, Math.min(8.0, vrRig.scale.x + delta * 5));
+      vrRig.scale.setScalar(VR_SCENE_SCALE);
+    }
+    vrLastGripDist = d;
+  } else {
+    vrLastGripDist = 0;
+  }
+
+  // ── VR: Skip DOM camera updates (headset controls the camera) ──
+  if (!isInVR) {
+    // Desktop camera code already ran above
+  }
+
+  renderer.render(scene, camera);
+}
+
+// ==================== RESIZE ====================
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ==================== IGLOO / CUBEMAP MODE ====================
+// For IGLOO 6-surface projection rooms:
+// Press 'I' to toggle cubemap rendering mode which outputs 6 faces
+let iglooMode = false;
+let cubeCamera = null;
+let cubeRenderTarget = null;
+let iglooFaceCanvases = []; // 6 canvases, one per face
+
+function initIglooMode() {
+  cubeRenderTarget = new THREE.WebGLCubeRenderTarget(2048, {
+    format: THREE.RGBAFormat,
+    generateMipmaps: false,
+  });
+  cubeCamera = new THREE.CubeCamera(0.1, 200, cubeRenderTarget);
+  scene.add(cubeCamera);
+
+  // Create 6 extraction canvases (can be sent to projectors)
+  const faceNames = ['+X (Right)', '-X (Left)', '+Y (Top)', '-Y (Bottom)', '+Z (Front)', '-Z (Back)'];
+  const iglooContainer = document.createElement('div');
+  iglooContainer.id = 'igloo-faces';
+  iglooContainer.style.cssText = 'position:fixed;bottom:10px;left:50%;transform:translateX(-50%);display:flex;gap:4px;z-index:9999;background:rgba(0,0,0,0.8);padding:8px;border-radius:8px;border:1px solid #22d3ee40;';
+  for (let i = 0; i < 6; i++) {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'text-align:center;';
+    const label = document.createElement('div');
+    label.textContent = faceNames[i];
+    label.style.cssText = 'color:#475569;font:10px monospace;margin-bottom:2px;';
+    const c = document.createElement('canvas');
+    c.width = 128; c.height = 128;
+    c.style.cssText = 'border:1px solid #22d3ee30;border-radius:4px;';
+    wrap.appendChild(label);
+    wrap.appendChild(c);
+    iglooContainer.appendChild(wrap);
+    iglooFaceCanvases.push(c);
+  }
+  document.body.appendChild(iglooContainer);
+
+  console.log('IGLOO cubemap mode initialized. 6-face preview at bottom of screen.');
+  console.log('Full resolution faces: cubeRenderTarget (2048x2048 each).');
+}
+
+function destroyIglooMode() {
+  const el = document.getElementById('igloo-faces');
+  if (el) el.remove();
+  iglooFaceCanvases = [];
+}
+
+// ── Cube face extraction for IGLOO / NDI / Spout output ──────────────
+const _faceScene = new THREE.Scene();
+const _faceCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const _faceMat = new THREE.ShaderMaterial({
+  uniforms: { tCube: { value: null }, face: { value: 0 } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position,1.0); }`,
+  fragmentShader: [
+    "uniform samplerCube tCube; uniform int face; varying vec2 vUv;",
+    "void main(){",
+    "  vec2 uv=vUv*2.0-1.0; vec3 dir;",
+    "  if(face==0)      dir=vec3( 1.0,-uv.y,-uv.x);",
+    "  else if(face==1) dir=vec3(-1.0,-uv.y, uv.x);",
+    "  else if(face==2) dir=vec3( uv.x, 1.0, uv.y);",
+    "  else if(face==3) dir=vec3( uv.x,-1.0,-uv.y);",
+    "  else if(face==4) dir=vec3( uv.x,-uv.y, 1.0);",
+    "  else             dir=vec3(-uv.x,-uv.y,-1.0);",
+    "  gl_FragColor=textureCube(tCube,normalize(dir));",
+    "}"
+  ].join("\n"),
+});
+_faceScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2), _faceMat));
+const _faceTarget = new THREE.WebGLRenderTarget(256, 256);
+const _facePixels = new Uint8Array(256*256*4);
+
+function extractCubeFaces() {
+  if (!cubeRenderTarget || !iglooFaceCanvases.length) return;
+  _faceMat.uniforms.tCube.value = cubeRenderTarget.texture;
+  for (let i = 0; i < 6; i++) {
+    _faceMat.uniforms.face.value = i;
+    renderer.setRenderTarget(_faceTarget);
+    renderer.render(_faceScene, _faceCam);
+    renderer.readRenderTargetPixels(_faceTarget, 0, 0, 256, 256, _facePixels);
+    renderer.setRenderTarget(null);
+    const ctx = iglooFaceCanvases[i].getContext('2d');
+    const img = new ImageData(256, 256);
+    for (let r = 0; r < 256; r++) {
+      const src = (255-r)*256*4;
+      img.data.set(_facePixels.subarray(src, src+256*4), r*256*4);
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+}
+
+// ── Stream Output (canvas.captureStream -> popup for OBS/NDI/Spout) ──
+function openStreamWindow() {
+  const stream = renderer.domElement.captureStream(60);
+  const win = window.open('', 'BeltinatStream',
+    "width="+window.screen.width+",height="+window.screen.height+",toolbar=0,menubar=0,location=0");
+  if (!win) { alert('Popup blocked — allow popups for this site.'); return; }
+  win.document.write('<!DOCTYPE html><html><head><title>Beltinator Stream<\/title>'
+    +'<style>*{margin:0;padding:0;}body{background:#000;}video{width:100vw;height:100vh;object-fit:contain;}<\/style>'
+    +'<\/head><body><video id="v" autoplay muted playsinline><\/video><\/body><\/html>');
+  win.document.close();
+  win.document.getElementById('v').srcObject = stream;
+}
+
+
+// ── Equirectangular output for IGLOO NDI streaming ───────────────────
+// Renders the cubemap to a 2:1 lat-long canvas that OBS can capture and
+// output as NDI — IGLOO Core Engine then applies its projector mapping.
+const EQUIRECT_W = 2048, EQUIRECT_H = 1024;
+const _equiScene = new THREE.Scene();
+const _equiCam   = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const _equiMat   = new THREE.ShaderMaterial({
+  uniforms: { tCube: { value: null } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position,1.0); }`,
+  fragmentShader: [
+    "uniform samplerCube tCube; varying vec2 vUv;",
+    "#define PI 3.14159265358979323846",
+    "void main(){",
+    "  float lon = (vUv.x) * 2.0 * PI - PI;",   // -PI .. PI
+    "  float lat = (vUv.y - 0.5) * PI;",          // -PI/2 .. PI/2
+    "  vec3 dir = vec3(cos(lat)*sin(lon), sin(lat), cos(lat)*cos(lon));",
+    "  gl_FragColor = textureCube(tCube, normalize(dir));",
+    "}"
+  ].join("\n"),
+});
+_equiScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), _equiMat));
+const _equiTarget = new THREE.WebGLRenderTarget(EQUIRECT_W, EQUIRECT_H);
+const _equiPixels = new Uint8Array(EQUIRECT_W * EQUIRECT_H * 4);
+let _equiCanvas = null;
+
+function renderEquirect() {
+  if (!cubeRenderTarget || !_equiCanvas) return;
+  _equiMat.uniforms.tCube.value = cubeRenderTarget.texture;
+  renderer.setRenderTarget(_equiTarget);
+  renderer.render(_equiScene, _equiCam);
+  renderer.readRenderTargetPixels(_equiTarget, 0, 0, EQUIRECT_W, EQUIRECT_H, _equiPixels);
+  renderer.setRenderTarget(null);
+  const ctx = _equiCanvas.getContext('2d');
+  const img = new ImageData(EQUIRECT_W, EQUIRECT_H);
+  for (let r = 0; r < EQUIRECT_H; r++) {
+    const src = (EQUIRECT_H - 1 - r) * EQUIRECT_W * 4; // flip Y (WebGL origin bottom-left)
+    img.data.set(_facePixels.subarray ? _equiPixels.subarray(src, src + EQUIRECT_W * 4)
+                                      : _equiPixels.slice(src, src + EQUIRECT_W * 4), r * EQUIRECT_W * 4);
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function openEquirectStream() {
+  if (!iglooMode) {
+    if (!confirm('IGLOO Cubemap mode is off. Enable it now?')) return;
+    toggleIglooMode();
+  }
+  _equiCanvas = document.createElement('canvas');
+  _equiCanvas.width  = EQUIRECT_W;
+  _equiCanvas.height = EQUIRECT_H;
+  const stream = _equiCanvas.captureStream(30);
+  const win = window.open('', 'BeltinatEquirect',
+    'width=1280,height=640,toolbar=0,menubar=0,location=0,scrollbars=0');
+  if (!win) { alert('Popup blocked \u2014 allow popups for this site.'); return; }
+  win.document.write('<!DOCTYPE html><html><head><title>Beltinator Equirect \u2014 IGLOO NDI<\/title>'
+    + '<style>*{margin:0;padding:0;}body{background:#000;}'
+    + 'video{width:100vw;height:100vh;object-fit:contain;}<\/style>'
+    + '<\/head><body><video id="v" autoplay muted playsinline><\/video><\/body><\/html>');
+  win.document.close();
+  win.document.getElementById('v').srcObject = stream;
+  const btn = document.getElementById('equirect-stream-btn');
+  if (btn) btn.classList.add('active');
+}
+
+function toggleIglooMode() {
+  iglooMode = !iglooMode;
+  if (iglooMode && !cubeCamera) initIglooMode();
+  if (!iglooMode) destroyIglooMode();
+  const fpsel = document.getElementById('fps-counter');
+  if (fpsel) fpsel.textContent = iglooMode ? 'IGLOO Cubemap' : 'Rendering';
+  const btn = document.getElementById('igloo-toggle-btn');
+  if (btn) btn.classList.toggle('active', iglooMode);
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'i' || e.key === 'I') toggleIglooMode();
+});
+
+// ==================== INIT ====================
+updateComputedValues();
+
+// Use setAnimationLoop for WebXR compatibility (works for both VR and desktop)
+renderer.setAnimationLoop(animate);
+</script>
+</body>
+</html>
