@@ -31,7 +31,7 @@ jobs:
       - name: Stage static site
         run: |
           mkdir -p dist
-          cp index.html storyboard.html app.html dist/
+          cp index.html storyboard.html app.html myapp.html dist/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
