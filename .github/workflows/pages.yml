@@ -34,9 +34,6 @@ jobs:
           cp \
             index.html \
             storyboard.html \
-            app.html \
-            myapp.html \
-            myapp-v16.html \
             beltinator_vr.html \
             beltinator_relay.js \
             Beltinator_IGLOO_Deployment_Manual.docx \
