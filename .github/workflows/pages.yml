@@ -35,8 +35,10 @@ jobs:
             index.html \
             storyboard.html \
             beltinator_vr.html \
+            beltinator_v8.html \
             beltinator_relay.js \
             Beltinator_IGLOO_Deployment_Manual.docx \
+            "beltinator_vr (8).html" \
             dist/
 
       - name: Upload Pages artifact

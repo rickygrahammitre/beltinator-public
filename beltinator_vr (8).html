@@ -1,0 +1,3700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SpaceSherpa Van Allen Beltinator — 3D Radiation Belt Explorer</title>
+<script>
+// ── ON-SCREEN DEBUG LOGGER ────────────────────────────────────────
+// Captures console.log, console.error, console.warn, and uncaught errors
+// Displays in a scrollable overlay visible in Quest browser
+(function() {
+  const MAX_LINES = 80;
+  const logLines = [];
+
+  // Create the logger UI as soon as DOM is ready
+  function createLoggerUI() {
+    const panel = document.createElement('div');
+    panel.id = 'debug-log';
+    panel.style.cssText = [
+      'position:fixed', 'bottom:60px', 'right:10px', 'width:420px', 'height:300px',
+      'background:rgba(0,0,0,0.92)', 'color:#0f0', 'font:11px/1.4 monospace',
+      'padding:8px', 'overflow-y:auto', 'z-index:99999',
+      'border:1px solid #22d3ee', 'border-radius:8px',
+      'pointer-events:auto', 'user-select:text',
+      'display:block',
+    ].join(';');
+    document.body.appendChild(panel);
+
+    // Toggle button
+    const btn = document.createElement('button');
+    btn.textContent = 'LOG';
+    btn.style.cssText = [
+      'position:fixed', 'bottom:20px', 'right:10px', 'z-index:99999',
+      'padding:6px 16px', 'background:rgba(0,0,0,0.85)', 'color:#22d3ee',
+      'border:1px solid #22d3ee', 'border-radius:6px',
+      'font:bold 12px monospace', 'cursor:pointer',
+    ].join(';');
+    btn.onclick = () => {
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    };
+    document.body.appendChild(btn);
+
+    // Clear button
+    const clr = document.createElement('button');
+    clr.textContent = 'CLR';
+    clr.style.cssText = [
+      'position:fixed', 'bottom:20px', 'right:70px', 'z-index:99999',
+      'padding:6px 12px', 'background:rgba(0,0,0,0.85)', 'color:#f59e0b',
+      'border:1px solid #f59e0b', 'border-radius:6px',
+      'font:bold 12px monospace', 'cursor:pointer',
+    ].join(';');
+    clr.onclick = () => { logLines.length = 0; panel.innerHTML = ''; };
+    document.body.appendChild(clr);
+
+    // Download button
+    const dl = document.createElement('button');
+    dl.textContent = 'SAVE';
+    dl.style.cssText = [
+      'position:fixed', 'bottom:20px', 'right:130px', 'z-index:99999',
+      'padding:6px 12px', 'background:rgba(0,0,0,0.85)', 'color:#10b981',
+      'border:1px solid #10b981', 'border-radius:6px',
+      'font:bold 12px monospace', 'cursor:pointer',
+    ].join(';');
+    dl.onclick = () => {
+      const text = logLines.map(l => `[${l.time}] ${l.type.toUpperCase()}: ${l.msg}`).join('\n');
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'beltinator_debug_' + new Date().toISOString().replace(/[:.]/g, '-') + '.txt';
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+    document.body.appendChild(dl);
+
+    return panel;
+  }
+
+  function addLine(type, args) {
+    const time = new Date().toLocaleTimeString('en-US', {hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    const msg = Array.from(args).map(a => {
+      if (a instanceof Error) return a.message + '\n' + (a.stack || '').split('\n').slice(0,3).join('\n');
+      if (typeof a === 'object') try { return JSON.stringify(a, null, 1); } catch(e) { return String(a); }
+      return String(a);
+    }).join(' ');
+
+    const colors = { log: '#0f0', warn: '#f59e0b', error: '#ef4444', info: '#22d3ee' };
+    const prefix = { log: '▸', warn: '⚠', error: '✖', info: 'ℹ' };
+
+    logLines.push({ type, time, msg });
+    if (logLines.length > MAX_LINES) logLines.shift();
+
+    const panel = document.getElementById('debug-log');
+    if (panel) {
+      const line = document.createElement('div');
+      line.style.cssText = `color:${colors[type] || '#0f0'}; border-bottom:1px solid #222; padding:2px 0; word-break:break-all;`;
+      line.textContent = `${time} ${prefix[type] || '▸'} ${msg}`;
+      panel.appendChild(line);
+      // Auto-scroll to bottom
+      panel.scrollTop = panel.scrollHeight;
+      // Trim DOM
+      while (panel.children.length > MAX_LINES) panel.removeChild(panel.firstChild);
+    }
+  }
+
+  // Override console methods
+  const origLog = console.log;
+  const origWarn = console.warn;
+  const origError = console.error;
+  const origInfo = console.info;
+
+  console.log = function() { origLog.apply(console, arguments); addLine('log', arguments); };
+  console.warn = function() { origWarn.apply(console, arguments); addLine('warn', arguments); };
+  console.error = function() { origError.apply(console, arguments); addLine('error', arguments); };
+  console.info = function() { origInfo.apply(console, arguments); addLine('info', arguments); };
+
+  // Catch uncaught errors
+  window.addEventListener('error', (e) => {
+    addLine('error', [`UNCAUGHT: ${e.message} at ${e.filename}:${e.lineno}:${e.colno}`]);
+  });
+
+  // Catch unhandled promise rejections
+  window.addEventListener('unhandledrejection', (e) => {
+    addLine('error', [`PROMISE REJECTED: ${e.reason}`]);
+  });
+
+  // Create UI when DOM is ready
+  if (document.body) {
+    createLoggerUI();
+  } else {
+    document.addEventListener('DOMContentLoaded', createLoggerUI);
+  }
+
+  // Log startup
+  addLine('info', ['Debug logger initialized']);
+  addLine('info', ['WebXR available: ' + ('xr' in navigator)]);
+  if ('xr' in navigator) {
+    navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+      addLine('info', ['immersive-vr supported: ' + ok]);
+    }).catch(err => {
+      addLine('error', ['immersive-vr check failed: ' + err]);
+    });
+  }
+})();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ── VRButton inline (from Three.js examples) ──────────────────────
+// Provides the "Enter VR" button for WebXR sessions
+class VRButton {
+  static createButton(renderer) {
+    const button = document.createElement('button');
+    function showEnterVR() {
+      let currentSession = null;
+      async function onSessionStarted(session) {
+        console.log('VRButton: onSessionStarted called');
+        session.addEventListener('end', onSessionEnded);
+        try {
+          await renderer.xr.setSession(session);
+          console.log('VRButton: renderer.xr.setSession succeeded');
+        } catch(e) {
+          console.error('VRButton: renderer.xr.setSession FAILED:', e);
+        }
+        button.textContent = 'EXIT VR';
+        currentSession = session;
+      }
+      function onSessionEnded() {
+        console.log('VRButton: onSessionEnded called');
+        currentSession.removeEventListener('end', onSessionEnded);
+        button.textContent = 'ENTER VR';
+        currentSession = null;
+      }
+      button.style.display = '';
+      button.style.cursor = 'pointer';
+      button.style.width = '180px';
+      button.textContent = 'ENTER VR';
+      button.onclick = function() {
+        if (currentSession === null) {
+          console.log('VRButton: Requesting immersive-vr session...');
+          const sessionInit = { optionalFeatures: ['local-floor'] };
+          navigator.xr.requestSession('immersive-vr', sessionInit).then(s => {
+            console.log('VRButton: Session obtained successfully');
+            onSessionStarted(s);
+          }).catch(e => {
+            console.error('VRButton: requestSession FAILED:', e);
+          });
+        } else {
+          console.log('VRButton: Ending session...');
+          currentSession.end();
+        }
+      };
+    }
+    function showWebXRNotFound() {
+      button.textContent = 'VR NOT SUPPORTED';
+      button.style.display = '';
+      button.style.width = '220px';
+      button.onclick = null;
+      button.style.cursor = 'default';
+      button.style.opacity = '0.5';
+    }
+    Object.assign(button.style, {
+      position: 'absolute', top: '70px', left: '50%', transform: 'translateX(-50%)',
+      padding: '14px 32px',
+      border: '2px solid #22d3ee', borderRadius: '10px',
+      background: 'rgba(6,8,15,0.95)', color: '#22d3ee',
+      font: '700 15px "JetBrains Mono", monospace', textAlign: 'center',
+      zIndex: '9999', transition: 'all 0.3s',
+      boxShadow: '0 0 20px rgba(34,211,238,0.3)',
+      letterSpacing: '2px',
+    });
+    button.onmouseenter = () => { button.style.background = 'rgba(34,211,238,0.15)'; };
+    button.onmouseleave = () => { button.style.background = 'rgba(6,8,15,0.9)'; };
+    if ('xr' in navigator) {
+      console.log('VRButton: navigator.xr exists, checking immersive-vr...');
+      navigator.xr.isSessionSupported('immersive-vr').then(supported => {
+        console.log('VRButton: immersive-vr supported = ' + supported);
+        supported ? showEnterVR() : showWebXRNotFound();
+      }).catch(e => { console.error('VRButton: isSessionSupported error:', e); showWebXRNotFound(); });
+    } else {
+      console.warn('VRButton: navigator.xr not available');
+      showWebXRNotFound();
+    }
+    return button;
+  }
+}
+</script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Space+Grotesk:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-primary: #06080f;
+    --bg-panel: rgba(10, 14, 26, 0.94);
+    --bg-card: rgba(16, 22, 40, 0.88);
+    --accent-blue: #3b82f6;
+    --accent-cyan: #22d3ee;
+    --accent-amber: #f59e0b;
+    --accent-orange: #f97316;
+    --accent-red: #ef4444;
+    --accent-green: #10b981;
+    --accent-purple: #a855f7;
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --text-dim: #475569;
+    --border: rgba(59, 130, 246, 0.12);
+    --border-active: rgba(34, 211, 238, 0.35);
+    --glow-blue: 0 0 20px rgba(59, 130, 246, 0.25);
+    --glow-cyan: 0 0 15px rgba(34, 211, 238, 0.2);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Outfit', sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  #canvas-container {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 0;
+    cursor: grab;
+  }
+  #canvas-container.grabbing { cursor: grabbing; }
+
+  canvas { display: block; }
+
+  /* ====== TOP BAR ====== */
+  .top-bar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 56px;
+    background: linear-gradient(180deg, rgba(10, 14, 26, 0.97) 0%, rgba(10, 14, 26, 0.92) 100%);
+    backdrop-filter: blur(24px);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    z-index: 100;
+    gap: 12px;
+  }
+
+  .top-bar .logo {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .top-bar .logo img {
+    height: 38px;
+    width: auto;
+    border-radius: 6px;
+    object-fit: contain;
+  }
+
+  .top-bar .divider {
+    width: 1px;
+    height: 24px;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+
+  .top-bar .title-block {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .top-bar .title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: 0.3px;
+  }
+
+  .top-bar .subtitle {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+
+  .top-bar .status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent-green);
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* ====== LEFT CONTROL PANEL ====== */
+  .control-panel {
+    position: fixed;
+    left: 10px;
+    top: 66px;
+    bottom: 10px;
+    width: 310px;
+    background: var(--bg-panel);
+    backdrop-filter: blur(24px);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    z-index: 50;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(71,85,105,0.4) transparent;
+  }
+
+  .control-panel::-webkit-scrollbar { width: 3px; }
+  .control-panel::-webkit-scrollbar-track { background: transparent; }
+  .control-panel::-webkit-scrollbar-thumb { background: rgba(71,85,105,0.4); border-radius: 2px; }
+
+  .panel-section {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .panel-section:last-child { border-bottom: none; }
+
+  .section-header {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--accent-cyan);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .section-header::before {
+    content: '';
+    width: 3px;
+    height: 10px;
+    background: var(--accent-cyan);
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  /* ====== SLIDER CONTROLS ====== */
+  .slider-group { margin-bottom: 12px; }
+
+  .slider-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 5px;
+  }
+
+  .slider-label .name {
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    font-weight: 400;
+  }
+
+  .slider-label .value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--accent-amber);
+    font-weight: 500;
+    min-width: 60px;
+    text-align: right;
+  }
+
+  .slider-label .value.driven {
+    color: var(--accent-cyan);
+    animation: valuePulse 2s infinite;
+  }
+
+  @keyframes valuePulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  input[type="range"] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 3px;
+    background: rgba(59, 130, 246, 0.12);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  input[type="range"]:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: var(--accent-cyan);
+    box-shadow: 0 0 8px rgba(34, 211, 238, 0.45);
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+
+  input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.25);
+    box-shadow: 0 0 14px rgba(34, 211, 238, 0.7);
+  }
+
+  input[type="range"]::-moz-range-thumb {
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: var(--accent-cyan);
+    box-shadow: 0 0 8px rgba(34, 211, 238, 0.45);
+    cursor: pointer;
+    border: none;
+  }
+
+  /* ====== BUTTONS ====== */
+  .btn-group {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.3px;
+  }
+
+  .btn:hover {
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+    box-shadow: var(--glow-cyan);
+  }
+
+  .btn.active {
+    background: rgba(34, 211, 238, 0.1);
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+  }
+
+  /* ====== RIGHT INFO PANEL ====== */
+  .info-panel {
+    position: fixed;
+    right: 10px;
+    top: 66px;
+    width: 350px;
+    max-height: calc(100vh - 76px);
+    overflow-y: auto;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(71,85,105,0.4) transparent;
+  }
+
+  .info-panel::-webkit-scrollbar { width: 3px; }
+  .info-panel::-webkit-scrollbar-track { background: transparent; }
+  .info-panel::-webkit-scrollbar-thumb { background: rgba(71,85,105,0.4); border-radius: 2px; }
+
+  .info-card {
+    background: var(--bg-panel);
+    backdrop-filter: blur(24px);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    transition: border-color 0.3s;
+  }
+
+  .info-card:hover {
+    border-color: rgba(59, 130, 246, 0.25);
+  }
+
+  .info-card h3 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--accent-cyan);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .info-card h3::before {
+    content: '';
+    width: 3px;
+    height: 10px;
+    background: var(--accent-cyan);
+    border-radius: 2px;
+  }
+
+  .equation-display {
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(59, 130, 246, 0.08);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin: 8px 0;
+    overflow-x: auto;
+  }
+
+  .equation-display .eq-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8.5px;
+    color: var(--accent-cyan);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .equation-display .eq-content {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--accent-amber);
+    line-height: 1.9;
+    white-space: nowrap;
+  }
+
+  .metric-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(59, 130, 246, 0.06);
+  }
+
+  .metric-row:last-child { border-bottom: none; }
+
+  .metric-row .label {
+    font-size: 11px;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: color 0.2s;
+    border-bottom: 1px dashed transparent;
+  }
+  .metric-row .label:hover {
+    color: var(--accent-cyan);
+    border-bottom-color: var(--accent-cyan);
+  }
+
+  /* Popup HUD overlay */
+  .popup-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: popIn 0.2s ease-out;
+  }
+  @keyframes popIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  .popup-card {
+    background: var(--bg-panel);
+    border: 1px solid rgba(34, 211, 238, 0.3);
+    border-radius: 12px;
+    padding: 24px 28px;
+    max-width: 480px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 0 40px rgba(34, 211, 238, 0.1);
+  }
+  .popup-card h4 {
+    color: var(--accent-cyan);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    margin: 0 0 12px 0;
+    letter-spacing: 0.5px;
+  }
+  .popup-card p {
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.7;
+    margin: 0 0 8px 0;
+  }
+  .popup-card .layman {
+    color: var(--accent-amber);
+    font-size: 13px;
+    line-height: 1.7;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(245, 158, 11, 0.15);
+  }
+  .popup-card .close-btn {
+    display: inline-block;
+    margin-top: 16px;
+    padding: 8px 20px;
+    background: transparent;
+    border: 1px solid var(--accent-cyan);
+    border-radius: 6px;
+    color: var(--accent-cyan);
+    font: 600 12px 'JetBrains Mono', monospace;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .popup-card .close-btn:hover {
+    background: rgba(34, 211, 238, 0.1);
+  }
+  .see-details-btn {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 4px 12px;
+    background: transparent;
+    border: 1px solid rgba(34, 211, 238, 0.3);
+    border-radius: 4px;
+    color: var(--accent-cyan);
+    font: 500 10px 'JetBrains Mono', monospace;
+    cursor: pointer;
+    letter-spacing: 0.5px;
+    transition: all 0.2s;
+  }
+  .see-details-btn:hover {
+    background: rgba(34, 211, 238, 0.1);
+    border-color: var(--accent-cyan);
+  }
+
+  .metric-row .val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  .metric-row .val.warn { color: var(--accent-amber); }
+  .metric-row .val.danger { color: var(--accent-red); }
+  .metric-row .val.safe { color: var(--accent-green); }
+
+  .description-text {
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+  }
+
+  /* ====== SATELLITE LEGEND ====== */
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: 10.5px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: color 0.2s;
+  }
+  .legend-item:hover { color: var(--accent-cyan); }
+
+  .legend-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ====== BOTTOM BAR ====== */
+  .bottom-bar {
+    position: fixed;
+    bottom: 10px;
+    left: 332px;
+    right: 372px;
+    height: 40px;
+    background: var(--bg-panel);
+    backdrop-filter: blur(24px);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    z-index: 50;
+    gap: 14px;
+  }
+
+  .bottom-bar .metric {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .bottom-bar .metric .lbl {
+    font-size: 9px;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.5px;
+  }
+
+  .bottom-bar .metric .val {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--accent-cyan);
+    font-weight: 500;
+  }
+
+  .bottom-bar .sep {
+    width: 1px;
+    height: 18px;
+    background: var(--border);
+  }
+
+  /* ====== TABS ====== */
+  .tab-row {
+    display: flex;
+    gap: 3px;
+    margin-bottom: 8px;
+  }
+
+  .tab {
+    padding: 4px 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8.5px;
+    letter-spacing: 0.3px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .tab:hover { color: var(--text-secondary); border-color: rgba(59, 130, 246, 0.2); }
+  .tab.active {
+    background: rgba(34, 211, 238, 0.08);
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+  }
+
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* ====== TOGGLE ====== */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 0;
+  }
+
+  .toggle-row label {
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+
+  .toggle {
+    position: relative;
+    width: 34px;
+    height: 18px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(59, 130, 246, 0.12);
+    border-radius: 9px;
+    outline: none;
+    cursor: pointer;
+    transition: 0.25s;
+    flex-shrink: 0;
+  }
+
+  .toggle:checked { background: var(--accent-cyan); }
+
+  .toggle::before {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    background: white;
+    border-radius: 50%;
+    transition: 0.25s;
+  }
+
+  .toggle:checked::before { left: 18px; }
+
+  /* ====== COLOR BAR ====== */
+  .color-bar {
+    width: 100%;
+    height: 10px;
+    border-radius: 5px;
+    background: linear-gradient(to right, #1a237e, #1565c0, #43a047, #fdd835, #ff6f00, #d50000);
+    margin: 6px 0 3px;
+  }
+
+  .color-bar-labels {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8.5px;
+    color: var(--text-dim);
+  }
+
+  /* ====== STORM INDICATOR ====== */
+  .storm-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    margin-top: 8px;
+    transition: all 0.3s;
+  }
+
+  .storm-indicator.quiet { background: rgba(16, 185, 129, 0.1); color: var(--accent-green); border: 1px solid rgba(16, 185, 129, 0.2); }
+  .storm-indicator.moderate { background: rgba(245, 158, 11, 0.1); color: var(--accent-amber); border: 1px solid rgba(245, 158, 11, 0.2); }
+  .storm-indicator.intense { background: rgba(239, 68, 68, 0.1); color: var(--accent-red); border: 1px solid rgba(239, 68, 68, 0.2); }
+
+  .storm-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+  }
+
+  .storm-indicator.quiet .storm-dot { background: var(--accent-green); box-shadow: 0 0 6px rgba(16,185,129,0.5); }
+  .storm-indicator.moderate .storm-dot { background: var(--accent-amber); box-shadow: 0 0 6px rgba(245,158,11,0.5); }
+  .storm-indicator.intense .storm-dot { background: var(--accent-red); box-shadow: 0 0 6px rgba(239,68,68,0.5); animation: pulse 1s infinite; }
+
+  /* ====== SATELLITE TOOLTIP ====== */
+  #sat-tooltip {
+    position: fixed;
+    z-index: 200;
+    background: var(--bg-panel);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--border-active);
+    border-radius: 10px;
+    padding: 12px 16px;
+    pointer-events: none;
+    display: none;
+    min-width: 200px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5), var(--glow-cyan);
+  }
+  #sat-tooltip.visible { display: block; pointer-events: auto; }
+  #sat-tooltip .sat-name {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  #sat-tooltip .sat-detail {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+  }
+
+  /* ====== BACK BUTTON (from satellite zoom) ====== */
+  #zoom-back-btn {
+    position: fixed;
+    top: 66px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 150;
+    background: var(--bg-panel);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--accent-cyan);
+    border-radius: 8px;
+    padding: 8px 20px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--accent-cyan);
+    cursor: pointer;
+    display: none;
+    gap: 6px;
+    align-items: center;
+    box-shadow: var(--glow-cyan);
+    transition: all 0.2s;
+  }
+  #zoom-back-btn:hover { background: rgba(34, 211, 238, 0.12); }
+  #zoom-back-btn.visible { display: flex; }
+
+  /* ====== KP TIMELINE BAR ====== */
+  .kp-timeline {
+    display: flex;
+    gap: 2px;
+    margin-top: 6px;
+    height: 20px;
+    align-items: flex-end;
+  }
+  .kp-bar {
+    flex: 1;
+    border-radius: 2px 2px 0 0;
+    transition: height 0.3s, background 0.3s;
+    min-height: 2px;
+    position: relative;
+  }
+  .kp-bar.current {
+    outline: 1px solid var(--accent-cyan);
+    outline-offset: 1px;
+  }
+  .kp-timeline-labels {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 7.5px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+
+  /* ====== ANIMATIONS ====== */
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .control-panel, .info-panel, .bottom-bar {
+    animation: fadeSlideIn 0.5s ease-out;
+  }
+
+  .info-card {
+    animation: fadeSlideIn 0.5s ease-out backwards;
+  }
+  .info-card:nth-child(1) { animation-delay: 0.05s; }
+  .info-card:nth-child(2) { animation-delay: 0.1s; }
+  .info-card:nth-child(3) { animation-delay: 0.15s; }
+  .info-card:nth-child(4) { animation-delay: 0.2s; }
+  .info-card:nth-child(5) { animation-delay: 0.25s; }
+
+  @media (max-width: 1200px) {
+    .info-panel { display: none; }
+    .bottom-bar { right: 20px; }
+  }
+  @media (max-width: 800px) {
+    .control-panel { width: 260px; }
+    .bottom-bar { left: 280px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Top Bar -->
+<div class="top-bar">
+  <span class="logo">
+    <img src="data:image/webp;base64,UklGRrgHAABXRUJQVlA4IKwHAAAwHwCdASpQAFAAPokykkelIqGhMzu8yKARCWwAwRAvkg6lBgXy8EXbuc9tpo+81/4CgQcpPruUF3d6kHbXhl3n+/7UC9f+X69az49AL2w+nf7bwi9Rq624wbxv2AP5p/aP+p/c/Ye+n/PX9Rf+L3Cf1c/7HYz9G79jXF7DloYtgJ/ieEqcrot9Ds803qrWmvXqq1yfGc6bnouLiJRLkVc1t2CMPTBxp2rqOHUWvW1ogX/DzbO9rAbwic+cEJODr51m/lSVAOmZSSvQ9sOHxvYBxtjqp13Qn6wQ6xE3ZT7dZe0KruEXKouc5eppjKQ2zPnkywXhfHRrfxhXbrzMq/0XkAAA/v+dFD8zjNyyvxi+l8lTEvTdl8F78jX/WX8p2BNz5+ow862XBYZ9HVfkC4aFiATt4B+ZPd623yoGy3aMSL6FiUUc8a2SeYK5yJZMyVODHepjHDM3fpB1QaGs29yH6mErKKzglrLuKQpdP9bQxpWQKERExllyESUKFdbEOe6F/YtzkFUpCjvJ5qE7bl+q4BxmiRK6rvrBGQo3V2MKngwSDabhqxixjE9bN6yq377n89Wh2hSDzeEMrCAPSezrS9gfuj8J5FhQHAvqE4cZIeJ0uT8NJG67c5VJcJXdqhEAxOALv/93FeuR0Vt2BW22DH5xG1ymEe0Exxyly8MXskZItJLx+ksJmiBINvbESNMXapcEgpai2tGj7PxTlUdJoImh4gM0heNqkJ0KVtgg8N92v1W6+FAzHQ3It/ut7aFBYo3ZiWxUlAEa8xfNJ8ybRm/28GasYj9wm9pHcgmF1dF5/3f08OHX3Ao+J1ED9Fa7cKJROyFiItNMBAoLUhTIk7DnIOsn9gctF5QJWq/cv/u11/CrLqXL18yPpCysxN9KHAZ6+HhRa8bdtwBlpTbO4oSDmsuFAtYnlIr7Rk5f38TlbedJfzK/3qtPphUFa/bRLjrzAUh5PTRdG3Df3wE756/txocJJAiRDlDwmruhHjVMKpgnnT9sBV1ejHXxSx4pe/w2Rhv9m+7PRoCQ75Qk9WBKzys3XryuCbGlvmS5BTyXDGbyxnvbE95kx4ZUeql+8OWAYinkBDcJ3UQHhr+zUDh4+TWS8LGWVggRdhY1zDgCb2dDVYb/8kkebBqRhNULT82w6I/fnFYKTaOgMK8LdlN161NNiOzzj0DSt6RrvGLvJtGC+e9J/nLlPCpwNAm4QQRAKeojnsxr/Asp5zG4iPLRaJqKcS/ZnCX9/tlBTCFVpve6WUdi01mXb+oj8Vjv8V7gTfvW40g4Bqog47edPmSu/EH43YHWBMfSpHK2G8sluV3HK33svOtyQQrKkwwJ6PiJZsAjAb++h1w3JuMfsEGcp6QIL0XkMdYKdDEChlTOA+fR5+JH8ptkzcb7ClZ67bzCrRJVAQJpDa8TYPhWmxqhvIRvIs7HbePm0bHc/4sYbAr7/1zLHIJA6XI1ocfilH11zw83j+qniS4FOFDq2aHV128oz/W71KwviE7vRMEWyLZZnaxU9H/d7THaL6W3FKljn/zQgpmOVWJSbuKOfK015C+pW17r0fvaJxtvwjFh8Bi4pyCxgiw41lydYwlPgMFpxKcv6UAt8LlvD7DdoQkQPXKa6TEvGN6Woij6cDYc4ykgzpkKmgCMkILM9NlsCPv4fqVTaT+RKrxmJjakBMl9ZaIirm+Nx97Z1XZBtbMYfvx49FHooMxPtA0Hs7z3gn7nYBD8nIzku9OaWyaZAoAawCLo8CDJ+xvJEFnvecu9yJL+RTNQEi55BVuD6h6TMOryTNM3dz8i1bB71tEKQTHdnpRnuQLuF1oePVIHT0Fxp/f1X+1HsQW2j5zfEUSOfMeJtezbtbgmJLjxzATEqG7MKPrbY7ORbQphBD3ciLrTq7+ju2UTQcU80Lzh8/pQ/7OH3kLDLo+gZmsBu/EPyUjB3W8fikVLL4PpE40Rx0TunFRnVIb9MwUtxIhXDixhBER731M9iqVdj31xqYIjCtdlOanaMMntZfztvw+Pwseov83eOjoQc/INS94fe+HxYRLqJ39R2dhZXEcQRn9dzmL8OypxuBlU0/CxeR3joOcXuaTrSh/3h08WlAQHyfj4RfpDIVDyZFkx+1Kf7csqtHqqv+Qcu8KQe/OfT2OYpz1CXljyIx5tqyLr9Q8zzmUGxDO25/7fZ+712G860K2EQK4Y6DSsMufuxl8kmHtYJ53Jm+UETQ07CKtkmWxDaimOhy/VUvTughobCJ8ByRLh7LCHVhaeiz9Nledho+j389vEbXz5TUDKXaRmJ306L/hf01474I2SGcxQS+pWP7/TFPk6gS/xp2gRchSkFV4kFQa3YoIsckOs9PoCyzavcI5gOlS0r9znLG1wtc342hy5vsUNIkX99fw97wtkOr2AB/Dgr8972X/OJD/q16eClr3JIiVibcwroLElQbpkWuDFn6jw1DnTuSRNA//o3Jj/i4ECt78B4J5/xqLyB4n5xYVEcPTLUOe4GAZhzwrhjGeL7UM8SBu3L6knDNcZgJECtAWxRIsVDwzpBSVJ7BqlVbnVIV/p5ATgvl/G9D7+vTcNYJLonwgCksfETXSbQYB+ky9V26njbudXQsAAAA==" alt="SpaceSherpa">
+    <img src="data:image/webp;base64,UklGRi4HAABXRUJQVlA4ICIHAABwHgCdASpQAEgAPok0lEelIqIhMzmdmKARCUAZCnl39WRHWrnw2bCYjvZXszyHOifMv6t/quGX4M5P/8B5zMBdcf9X/1PhL6i96JxIvjvsAfnP9ZfYb/5/1u9NH057BP8v/sH/J9cr2I+j4s9/VsyHw9ArW//mwtSdFuG21+UibnLo+r37Rnr61AVwjyBgwff6+qN4sG2cuffsbDQrrwHtjn99k1aItwWj78brW6/+LXg1AlS2IgVNYKGAloxYrJqqiWg7TK025TUvLIzbw+9N1ObnsHSst6z3LanXx+tv8GDSw5QoudDfcaFBBgns5xwfNoAXhhjFGSCEoQAA/v71xBI8G5xzO+LS9k0LI58U0mx4/oqTdivQeHj/5kCotV6QH4OikSUkv989cyr9kNHdoPjIsID9vE60wJZj0VDwRbwOqwYpt4GCJyfi4zcmcqa7tUmuw2ujLQtxvPJX44pv0u+4FMb0xzijUUK9Vgsch8Eu2cst6bcikOZwYpdLApmQvwLyRcl0fInQAz/85JqGosUc539n8e16rkge7Z3Isee3np6zTw/3yatrmhtH/LSHB9NazflXiywyJpsjsm/PGg3HCo39VD7n4YdpRCfK/KU8BsNnPJyfPGClCbh358ssV22vKDoJnTHu3YsMl+Bouz4Cmclu8gk9y9eONpybIdEv4xufWhXNfN1iPyVsceMhUYoZh5wS/tzcOV1yUtUWJasqGPd7MScQRcGSWuKH4snxoP5B5D6a6y5Qd+rOMpi2qWFXPvN2nff+LRal/ocbjmrJ8866r0Fkn5PAXYgf1hldIaqvqhB/w4ZZeX6ShhCjYoIPYDPivMWrT+PdhkuoVME/LUy7nPF6Cr4fRHp5ycBP7UKQcfoq6xfMF9n5CXfgQe96XcwKRLkDfPI/PbZwrKFRQldsgo6veL8/e0+3r4KKvdInEnkreM3VYj9cnzXeFv7VfLQf84hazJoVIesmnnYtqJ7V8ZuAhZIjfsk7NApDBaCy/xGjH+FlifkQqS/HEsdba36+bxl9Zr2fzO6qBdf0lrh4dn1/9yG0GQkQueZqGPdBquPShMp4qXJUisrXN0Rean5bjYSds/Clg1+e9M2zvqE/PnG4bD2N6rb2gsEAMpIV183W5OPVZYB23YPUSF0Uh+nMP6swiuFAc5uuFVDwJzpb3/OKNioydIrGvstsGxX5sxdLZmNHT/YRf2TzteY37Fu1Q0g1pJFK1+wk2PyEFndFIEK7mAmcBi4jxfuWGSppnFeUslee7F//feLSP0CtNkF+tAdCFK6xucmqajFncXSwl1cpMSEnS0GjPgzY0zGy9pHDus+Ql0OJLcearl3Ni3lq7kcDya2RubFMGrWpcExH2LjPJhCaSjnvhoZjcv44NSxi23i2w69qcUkb0sS1Giuhgf0GnjbfYjRPCU1jQtGFjrZO9HcUKnRk7+yW2WZ5khvToyvxwpI4zumXrUYvM0OWyu4avwk77nvkr5vi7/zJOz353B737Fs6mQWjSux/DuoFUdDwLNnsTBZL2wX9b2qZgYFHOU81piEaVzyf66IfJOp+AYFU2K+aqLn6pyKjnuj+CQHdx0n6XOyFDbikINpSO+cggAtzk403n0cGN8sXcPWwGKDNZ97xR6Z2W03m2K9EmL+a7WI4j7YLrHLtAPFNi6U3iJw/jG/1/vyS8O8DHTVT2QrNe7L+b6vQJOfrB9817+mJEBCUZQhrDM6DmJ7NZf6Gs3Vhw1fRwEomRQcr89HP83A1wXIqbWf9jmuyPFv/CiDu7wuFITb2qc0/vZh2Xb06x8VnpL/xB0Xjb7/li+t2mGiaBb2Cn3greM42Al2oAEcfr4OD+rm0tioF4+Hl18ecAe+csmtlS/61//CRsxiLeq77o39jnMyEP/BN/v+DgAJYJgR4v30wIkiFAQxrp+PgBJaTK1Iwpnfw9FUxMnxymJ5M1MPouNw6+HGeKtyKK87oarsk43k4rVzXYiimKvJEisY/JmI63Se+j7zTn8Ob1chXZNCCVtANfsUj8Tv9ri9aRRHx/fxMKYyDjGyj6VP5hfZgVVxYfTXjdAYNoW/GDvsIc5qSFHutJ/A/OAcF+6mSQHZek7fjUTq+f0QK0JpXt9NR2f348JWkeKjuHN28pHb//KTOugrAZu/Ae8VXgPd4Pjjmvv+SvFd30euOxa44riqgbt21Cm2v8HwTCbyrvCHWpxq4LdWs1Ph4a0/5xHlqQs353bSp7osyLqjenfd9sCaHORBFBhE8oZgW9LQ//J8OGfxljvcuQfsOWyvi+Xu/CJ3/wZ0Yf67e/TLYg+2LAVd1P/wHMOIfoPSb9RAiuUF/Dia40Vz9fOsg9QjpldnphXmnUBFGCYxw637foWkxsfWcmpcHK/Qr1WXgbCPY8cd7QTArl7CJ/g17oAesHwjpt3GdJIAAAA==" alt="Beltinator">
+  </span>
+  <div class="divider"></div>
+  <div class="title-block">
+    <span class="title">Van Allen Beltinator</span>
+    <span class="subtitle">3D Fokker-Planck Radiation Belt Explorer</span>
+  </div>
+  <div class="status">
+    <div class="status-dot"></div>
+    <span id="fps-counter">Rendering</span>
+    <span style="margin-left:8px; color:var(--accent-amber);" id="sim-time-display">T+0.0h</span>
+  </div>
+</div>
+
+<!-- 3D Canvas -->
+<div id="canvas-container"></div>
+
+<!-- Satellite Tooltip -->
+<div id="sat-tooltip">
+  <div class="sat-name" id="sat-tooltip-name"></div>
+  <div class="sat-detail" id="sat-tooltip-detail"></div>
+</div>
+
+<!-- Zoom Back Button -->
+<button id="zoom-back-btn" onclick="zoomBackToOverview()">◀ Back to Overview</button>
+
+<!-- Left Control Panel -->
+<div class="control-panel">
+
+  <div class="panel-section">
+    <div class="section-header">Physics Parameters</div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">L* (Drift Shell)</span>
+        <span class="value" id="lstar-val">4.5</span>
+      </div>
+      <input type="range" id="lstar" min="1" max="8" step="0.1" value="4.5">
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">Energy (MeV)</span>
+        <span class="value" id="energy-val">1.0</span>
+      </div>
+      <input type="range" id="energy" min="0.1" max="10" step="0.1" value="1.0">
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">Equatorial Pitch Angle α₀ (°)</span>
+        <span class="value" id="alpha-val">45</span>
+      </div>
+      <input type="range" id="alpha" min="1" max="89" step="1" value="45">
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">D<sub>L*L*</sub> (Radial Diffusion)</span>
+        <span class="value driven" id="dll-val">1.0e-6 ⟲</span>
+      </div>
+      <input type="range" id="dll" min="-9" max="-3" step="0.1" value="-6" disabled title="Driven by Kp(t)">
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">D<sub>pp</sub> (Momentum Diffusion)</span>
+        <span class="value" id="dpp-val">1.0e-7</span>
+      </div>
+      <input type="range" id="dpp" min="-10" max="-4" step="0.1" value="-7">
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">D<sub>α₀α₀</sub> (Pitch-Angle Diffusion)</span>
+        <span class="value" id="daa-val">1.0e-5</span>
+      </div>
+      <input type="range" id="daa" min="-8" max="-2" step="0.1" value="-5">
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">D<sub>α₀p</sub> (Mixed Diffusion)</span>
+        <span class="value" id="dap-val">0 (off)</span>
+      </div>
+      <input type="range" id="dap" min="-10" max="-4" step="0.1" value="-10" disabled>
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">Loss Timescale τ (days)</span>
+        <span class="value" id="tau-val">10.0</span>
+      </div>
+      <input type="range" id="tau" min="0.1" max="30" step="0.1" value="10">
+    </div>
+  </div>
+
+  <div class="panel-section">
+    <div class="section-header">Geomagnetic Conditions</div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">Kp Baseline</span>
+        <span class="value" id="kp-val">3</span>
+      </div>
+      <input type="range" id="kp" min="0" max="9" step="1" value="3">
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">Dst Index (nT)</span>
+        <span class="value" id="dst-val">-30</span>
+      </div>
+      <input type="range" id="dst" min="-300" max="50" step="5" value="-30">
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span class="name">Solar Wind V<sub>sw</sub> (km/s)</span>
+        <span class="value" id="vsw-val">400</span>
+      </div>
+      <input type="range" id="vsw" min="200" max="900" step="10" value="400">
+    </div>
+
+    <div class="storm-indicator quiet" id="storm-indicator">
+      <div class="storm-dot"></div>
+      <span id="storm-label">Quiet Conditions</span>
+    </div>
+
+    <!-- Kp 3-hour timeline -->
+    <div style="margin-top:10px;">
+      <div class="section-header" style="font-size:8px; margin-bottom:4px;">Kp(t) — 3-Hour Cadence Profile</div>
+      <div class="kp-timeline" id="kp-timeline"></div>
+      <div class="kp-timeline-labels">
+        <span>0h</span><span>12h</span><span>24h</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-section">
+    <div class="section-header">Visualization</div>
+
+    <div class="toggle-row">
+      <label for="show-belts">Radiation Belts</label>
+      <input type="checkbox" class="toggle" id="show-belts" checked>
+    </div>
+    <div class="toggle-row">
+      <label for="show-orbits">Satellite Orbits</label>
+      <input type="checkbox" class="toggle" id="show-orbits" checked>
+    </div>
+    <div class="toggle-row">
+      <label for="show-field">Magnetic Field Lines</label>
+      <input type="checkbox" class="toggle" id="show-field" checked>
+    </div>
+    <div class="toggle-row">
+      <label for="show-particles">Particle Trajectories</label>
+      <input type="checkbox" class="toggle" id="show-particles" checked>
+    </div>
+    <div class="toggle-row">
+      <label for="show-loss-cone">Loss Cone</label>
+      <input type="checkbox" class="toggle" id="show-loss-cone">
+    </div>
+    <div class="toggle-row">
+      <label for="mixed-terms">Include Mixed Terms (Eq.3)</label>
+      <input type="checkbox" class="toggle" id="mixed-terms">
+    </div>
+    <div class="toggle-row">
+      <label for="sim-running">Run Kp(t) Simulation</label>
+      <input type="checkbox" class="toggle" id="sim-running" checked>
+    </div>
+
+    <div style="margin-top: 10px;">
+      <div class="slider-group">
+        <div class="slider-label">
+          <span class="name">Sim Speed (×)</span>
+          <span class="value" id="sim-speed-val">60</span>
+        </div>
+        <input type="range" id="sim-speed" min="1" max="360" step="1" value="60">
+      </div>
+    </div>
+
+    <div style="margin-top: 6px;">
+      <div class="section-header" style="font-size:8px; margin-bottom:6px;">Flux Intensity (cm⁻²s⁻¹sr⁻¹MeV⁻¹)</div>
+      <div class="color-bar"></div>
+      <div class="color-bar-labels">
+        <span>10²</span><span>10⁴</span><span>10⁶</span><span>10⁸</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-section">
+    <div class="section-header">Presets</div>
+    <div class="btn-group">
+      <button class="btn active" onclick="applyPreset('quiet', this)">Quiet Time</button>
+      <button class="btn" onclick="applyPreset('moderate', this)">Moderate Storm</button>
+      <button class="btn" onclick="applyPreset('intense', this)">Intense Storm</button>
+      <button class="btn" onclick="applyPreset('recovery', this)">Recovery Phase</button>
+    </div>
+  </div>
+
+  <div class="panel-section">
+    <div class="section-header">Satellites (Click in 3D to zoom)</div>
+    <div class="legend-item" onclick="focusSatByName('RBSP')"><div class="legend-dot" style="background:#ef4444;"></div>Van Allen Probes (RBSP A/B)</div>
+    <div class="legend-item" onclick="focusSatByName('THEMIS-A')"><div class="legend-dot" style="background:#3b82f6;"></div>THEMIS A / D / E</div>
+    <div class="legend-item" onclick="focusSatByName('GOES')"><div class="legend-dot" style="background:#10b981;"></div>GOES (GEO)</div>
+    <div class="legend-item" onclick="focusSatByName('LEO')"><div class="legend-dot" style="background:#f59e0b;"></div>LEO Satellites</div>
+    <div class="legend-item" onclick="focusSatByName('Lomonosov')"><div class="legend-dot" style="background:#a855f7;"></div>Lomonosov</div>
+  </div>
+
+</div>
+
+<!-- Right Info Panel -->
+<div class="info-panel">
+
+  <div class="info-card">
+    <h3>Computed Values</h3>
+    <div class="metric-row">
+      <span class="label" onclick="showPopup('bounce')">T(α₀) Bounce Factor</span>
+      <span class="val" id="bounce-val">1.0802</span>
+    </div>
+    <div class="metric-row">
+      <span class="label" onclick="showPopup('psd')">Phase Space Density f</span>
+      <span class="val" id="psd-val">2.34e-10</span>
+    </div>
+    <div class="metric-row">
+      <span class="label" onclick="showPopup('flux')">Differential Flux j</span>
+      <span class="val" id="flux-val">4.56e+04</span>
+    </div>
+    <div class="metric-row">
+      <span class="label" onclick="showPopup('dll')">D<sub>L*L*</sub> (Kp-driven)</span>
+      <span class="val" id="dll-live" style="color:var(--accent-cyan);">1.0e-6</span>
+    </div>
+    <div class="metric-row">
+      <span class="label" onclick="showPopup('kp')">Kp(t) Current</span>
+      <span class="val" id="kp-current-val">3.0</span>
+    </div>
+    <div class="metric-row">
+      <span class="label" onclick="showPopup('lmp')">Magnetopause L<sub>mp</sub></span>
+      <span class="val" id="lmp-val">10.2 R<sub>E</sub></span>
+    </div>
+    <div class="metric-row">
+      <span class="label" onclick="showPopup('lcds')">Last Closed Drift Shell</span>
+      <span class="val" id="lcds-val">7.8 R<sub>E</sub></span>
+    </div>
+    <div class="metric-row">
+      <span class="label" onclick="showPopup('blc')">Bounce Loss Cone α<sub>BLC</sub></span>
+      <span class="val" id="blc-val">3.2°</span>
+    </div>
+    <div class="metric-row">
+      <span class="label" onclick="showPopup('dlc')">Drift Loss Cone α<sub>DLC</sub></span>
+      <span class="val" id="dlc-val">5.1°</span>
+    </div>
+    <div class="metric-row">
+      <span class="label" onclick="showPopup('trapstatus')">Particle Status</span>
+      <span class="val safe" id="trap-status">Trapped</span>
+    </div>
+  </div>
+
+  <div class="info-card">
+    <h3>Governing Equations</h3>
+    <div class="tab-row">
+      <button class="tab active" onclick="showTab('eq1',this)">Eq.1</button>
+      <button class="tab" onclick="showTab('eq2',this)">Eq.2</button>
+      <button class="tab" onclick="showTab('eq3',this)">Eq.3</button>
+      <button class="tab" onclick="showTab('eq4',this)">T(α₀)</button>
+      <button class="tab" onclick="showTab('eq5',this)">D<sub>LL</sub>(Kp)</button>
+    </div>
+
+    <div id="eq1" class="tab-content active">
+      <div class="equation-display">
+        <div class="eq-label">Eq.1 — Generalized Diffusion Equation</div>
+        <div class="eq-content">∂f/∂t = ∂/∂Jᵢ (Dᵢⱼ ∂f/∂Jⱼ)<br>i,j = 1,2,3</div>
+      </div>
+      <p class="description-text">Phase space density f evolves via diffusion in the three adiabatic invariants (J₁, J₂, J₃), corresponding to gyration, bounce, and azimuthal drift motion.</p>
+      <button class="see-details-btn" onclick="showPopup('eq1')">See Details</button>
+    </div>
+
+    <div id="eq2" class="tab-content">
+      <div class="equation-display">
+        <div class="eq-label">Eq.2 — Fokker-Planck (no mixed terms)</div>
+        <div class="eq-content">
+          ∂f/∂t = L*² ∂/∂L*|<sub>μ,J</sub> (D<sub>L*L*</sub> L*⁻² ∂f/∂L*|<sub>μ,J</sub>)<br>
+          + 1/p² ∂/∂p|<sub>y,L</sub> (p² ⟨D<sub>pp</sub>(y,p)⟩<sub>ba</sub> ∂f/∂p|<sub>y,L</sub>)<br>
+          + 1/(T(y)·y) ∂/∂y|<sub>p,L</sub> (T(y)·y·⟨D<sub>yy</sub>(y,p)⟩<sub>ba</sub> ∂f/∂y|<sub>p,L</sub>)<br>
+          − f/τ
+        </div>
+      </div>
+      <p class="description-text">Separates radial diffusion (L*), momentum diffusion (p), and pitch-angle diffusion (y = sin α₀) with bounce-averaged coefficients. D<sub>L*L*</sub> is now time-dependent via Kp(t).</p>
+      <button class="see-details-btn" onclick="showPopup('eq2')">See Details</button>
+    </div>
+
+    <div id="eq3" class="tab-content">
+      <div class="equation-display">
+        <div class="eq-label">Eq.3 — Fokker-Planck with Mixed Terms</div>
+        <div class="eq-content">
+          ∂f/∂t = L*² ∂/∂L*|<sub>μ,J</sub> (D<sub>L*L*</sub> L*⁻² ∂f/∂L*|<sub>μ,J</sub>)<br>
+          + 1/p² ∂/∂p|<sub>α₀,L</sub> p²(⟨D<sub>pp</sub>⟩ ∂f/∂p + ⟨D<sub>pα₀</sub>⟩ ∂f/∂α₀)<br>
+          + 1/(T(α₀)sin2α₀) ∂/∂α₀|<sub>p,L</sub> T(α₀)sin2α₀<br>
+          &nbsp;&nbsp;·(⟨D<sub>α₀α₀</sub>⟩ ∂f/∂α₀ + ⟨D<sub>α₀p</sub>⟩ ∂f/∂p) − f/τ
+        </div>
+      </div>
+      <p class="description-text">D<sub>α₀p</sub> is the mixed energy–pitch angle diffusion coefficient. Cross-diffusion terms couple momentum and pitch-angle evolution.</p>
+      <button class="see-details-btn" onclick="showPopup('eq3')">See Details</button>
+    </div>
+
+    <div id="eq4" class="tab-content">
+      <div class="equation-display">
+        <div class="eq-label">Bounce Period Factor T(α₀)</div>
+        <div class="eq-content">T(α₀) = 1.3802 − 0.3198·(sin(α₀) + sin²(α₀))</div>
+      </div>
+      <p class="description-text">Approximation for the normalized bounce period (Schulz & Lanzerotti 1974). Particles near the loss cone have T ≈ 1.38; those near 90° have T ≈ 0.74.</p>
+      <button class="see-details-btn" onclick="showPopup('eq4')">See Details</button>
+    </div>
+
+    <div id="eq5" class="tab-content">
+      <div class="equation-display">
+        <div class="eq-label">D<sub>L*L*</sub>(Kp) — Brautigam & Albert 2000</div>
+        <div class="eq-content">D<sub>L*L*</sub> = D₀ · 10^(0.506·Kp − 9.325) · L*¹⁰</div>
+      </div>
+      <p class="description-text">Radial diffusion coefficient parameterized by Kp index and L-shell. Higher Kp dramatically increases radial transport, driving inward diffusion and energization during storms. Kp is updated every 3 hours in this simulation.</p>
+      <button class="see-details-btn" onclick="showPopup('eq5')">See Details</button>
+    </div>
+  </div>
+
+  <div class="info-card">
+    <h3>Radiation Belt Physics</h3>
+    <p class="description-text">
+      Relativistic electrons (>500 keV) undergo three periodic motions: <strong>gyration</strong> (μ), <strong>bounce</strong> (J), and azimuthal <strong>drift</strong> (Φ = L*). ULF waves drive radial diffusion, chorus waves produce local acceleration, and magnetopause shadowing causes loss on the dayside.
+    </p>
+    <p class="description-text layman" style="color:var(--accent-amber); margin-top:10px; padding-top:8px; border-top:1px solid rgba(245,158,11,0.15);">
+      <strong>What this means in layman's terms:</strong> High-energy particles get trapped by Earth's magnetic field and form two donut-shaped belts around the planet. These particles constantly spiral around magnetic field lines, bounce back and forth between the north and south poles, and slowly drift around the Earth. During magnetic storms, powerful waves can push particles deeper into the belts (making them more energetic and dangerous to satellites), while other processes can knock particles out of the belts entirely. It's a constant tug-of-war between forces that fill the belts and forces that drain them.
+    </p>
+  </div>
+
+  <div class="info-card">
+    <h3>Magnetic Field Notes</h3>
+    <p class="description-text">
+      The local B-field determines energy from μ. Because electron spectra are steep, small ΔB errors produce large flux errors — especially at high L. At LEO, populations include <strong>Trapped</strong>, <strong>BLC</strong>, and <strong>DLC</strong> electrons requiring accurate magnetic mapping to classify.
+    </p>
+    <p class="description-text layman" style="color:var(--accent-amber); margin-top:10px; padding-top:8px; border-top:1px solid rgba(245,158,11,0.15);">
+      <strong>What this means in layman's terms:</strong> Earth's magnetic field acts like an invisible container that holds these dangerous particles in place. The strength of the magnetic field at any location determines how energetic the particles are. Even small errors in measuring the magnetic field can lead to very wrong estimates of how many particles are present — this matters enormously for predicting radiation damage to satellites and astronauts. At low altitudes where spacecraft like the ISS orbit, some particles are stably trapped, while others are on their way to hitting the atmosphere.
+    </p>
+  </div>
+
+</div>
+
+<!-- Bottom Bar -->
+<div class="bottom-bar">
+  <div class="metric">
+    <span class="lbl">L*</span>
+    <span class="val" id="bot-lstar">4.5 R<sub>E</sub></span>
+  </div>
+  <div class="sep"></div>
+  <div class="metric">
+    <span class="lbl">E</span>
+    <span class="val" id="bot-energy">1.0 MeV</span>
+  </div>
+  <div class="sep"></div>
+  <div class="metric">
+    <span class="lbl">α₀</span>
+    <span class="val" id="bot-alpha">45°</span>
+  </div>
+  <div class="sep"></div>
+  <div class="metric">
+    <span class="lbl">Kp(t)</span>
+    <span class="val" id="bot-kp">3.0</span>
+  </div>
+  <div class="sep"></div>
+  <div class="metric">
+    <span class="lbl">D<sub>LL</sub></span>
+    <span class="val" id="bot-dll">1.0e-6</span>
+  </div>
+  <div class="sep"></div>
+  <div class="metric">
+    <span class="lbl">Model</span>
+    <span class="val" id="bot-model">Eq.2</span>
+  </div>
+  <div class="sep"></div>
+  <div class="metric">
+    <span class="lbl">Sim</span>
+    <span class="val" id="bot-simtime">T+0.0h</span>
+  </div>
+</div>
+
+<script>
+// ==================== THREE.JS SETUP ====================
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 200);
+camera.position.set(12, 8, 12);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(0x06080f, 1);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local');
+console.log('Three.js renderer.xr.enabled = true, referenceSpace = local');
+container.appendChild(renderer.domElement);
+container.appendChild(VRButton.createButton(renderer));
+console.log('VR button appended to container');
+
+// ══════════════════════════════════════════════════════════════════
+// VR SYSTEM — Full interaction: positioning, controllers, HUD, zoom
+// ══════════════════════════════════════════════════════════════════
+let isInVR = false;
+
+// ── User Rig: positions the VR user in space ──────────────────────
+// In Three.js r128 WebXR, the camera is managed by the XR system.
+// We create a "dolly" group, add the camera to it, and move the dolly
+// to position the user outside the belts looking in.
+const vrDolly = new THREE.Group();
+vrDolly.add(camera);
+scene.add(vrDolly);
+
+// ── VR Controllers ────────────────────────────────────────────────
+const controller0 = renderer.xr.getController(0);
+const controller1 = renderer.xr.getController(1);
+vrDolly.add(controller0);
+vrDolly.add(controller1);
+
+// Controller hand models (from getControllerGrip for visual)
+const grip0 = renderer.xr.getControllerGrip(0);
+const grip1 = renderer.xr.getControllerGrip(1);
+vrDolly.add(grip0);
+vrDolly.add(grip1);
+
+// Simple controller visualization — cyan ray + small sphere at hand
+function buildControllerVisual() {
+  const group = new THREE.Group();
+  // Ray
+  const rayGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -8)
+  ]);
+  group.add(new THREE.Line(rayGeo, new THREE.LineBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.4 })));
+  // Hand dot
+  const dot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.015, 8, 8),
+    new THREE.MeshBasicMaterial({ color: 0x22d3ee })
+  );
+  group.add(dot);
+  return group;
+}
+controller0.add(buildControllerVisual());
+controller1.add(buildControllerVisual());
+
+// ── Controller State Tracking ─────────────────────────────────────
+let vrSelect = [false, false]; // trigger (select)
+let vrSqueeze = [false, false]; // grip (squeeze)
+let vrPrevControllerPos = [new THREE.Vector3(), new THREE.Vector3()];
+
+controller0.addEventListener('selectstart', () => { vrSelect[0] = true; console.log('C0 select'); });
+controller0.addEventListener('selectend', () => { vrSelect[0] = false; });
+controller1.addEventListener('selectstart', () => { vrSelect[1] = true; console.log('C1 select'); });
+controller1.addEventListener('selectend', () => { vrSelect[1] = false; });
+controller0.addEventListener('squeezestart', () => { vrSqueeze[0] = true; console.log('C0 squeeze'); });
+controller0.addEventListener('squeezeend', () => { vrSqueeze[0] = false; });
+controller1.addEventListener('squeezestart', () => { vrSqueeze[1] = true; console.log('C1 squeeze'); });
+controller1.addEventListener('squeezeend', () => { vrSqueeze[1] = false; });
+
+// ── VR Floating Panels — Full Desktop UI in World Space ──────────
+// Three panels: Left (controls), Center (computed values), Right (equations/info)
+// Each rendered to a canvas texture and displayed as a floating mesh
+
+function createVRPanel(width, height, geoW, geoH) {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(geoW, geoH),
+    new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide, depthWrite: false })
+  );
+  mesh.visible = false;
+  vrDolly.add(mesh);
+  return { canvas, ctx, texture, mesh };
+}
+
+// Left panel: Physics controls & sliders
+const vrPanelLeft = createVRPanel(1024, 1800, 3.5, 6.2);
+// Center panel: Computed values & status
+const vrPanelCenter = createVRPanel(1024, 1400, 3.5, 4.8);
+// Right panel: Equations & physics info
+const vrPanelRight = createVRPanel(1024, 1600, 3.5, 5.5);
+
+// Alias for backward compat with existing HUD code
+const vrHudPanel = vrPanelCenter.mesh;
+const vrHudCanvas = vrPanelCenter.canvas;
+const vrHudCtx = vrPanelCenter.ctx;
+const vrHudTexture = vrPanelCenter.texture;
+
+// Small toggle icon to show/hide HUD
+const vrHudToggle = new THREE.Mesh(
+  new THREE.SphereGeometry(0.12, 16, 16),
+  new THREE.MeshBasicMaterial({ color: 0x22d3ee })
+);
+vrHudToggle.visible = false;
+vrHudToggle.userData.isHudToggle = true;
+vrDolly.add(vrHudToggle);
+
+let vrHudVisible = true;
+let vrHudNeedsUpdate = true;
+
+// ── VR Debug Logger (visible inside headset) ──────────────────────
+const vrLogLines = [];
+const vrLogCanvas = document.createElement('canvas');
+vrLogCanvas.width = 1024;
+vrLogCanvas.height = 512;
+const vrLogCtx = vrLogCanvas.getContext('2d');
+const vrLogTexture = new THREE.CanvasTexture(vrLogCanvas);
+vrLogTexture.minFilter = THREE.LinearFilter;
+const vrLogPanel = new THREE.Mesh(
+  new THREE.PlaneGeometry(2.5, 1.25),
+  new THREE.MeshBasicMaterial({ map: vrLogTexture, transparent: true, side: THREE.DoubleSide, depthWrite: false })
+);
+vrLogPanel.position.set(0, -0.5, -2.5); // Below eye level, forward
+vrLogPanel.visible = false;
+vrDolly.add(vrLogPanel);
+
+// Download sphere for VR log (green)
+const vrLogDownload = new THREE.Mesh(
+  new THREE.SphereGeometry(0.08, 16, 16),
+  new THREE.MeshBasicMaterial({ color: 0x10b981 })
+);
+vrLogDownload.position.set(1.4, -0.5, -2.5);
+vrLogDownload.visible = false;
+vrLogDownload.userData.isLogDownload = true;
+vrDolly.add(vrLogDownload);
+
+// Toggle sphere for VR log (amber, next to main toggle)
+const vrLogToggle = new THREE.Mesh(
+  new THREE.SphereGeometry(0.08, 16, 16),
+  new THREE.MeshBasicMaterial({ color: 0xf59e0b })
+);
+vrLogToggle.position.set(0.3, 2.8, -2.5);
+vrLogToggle.visible = false;
+vrLogToggle.userData.isLogToggle = true;
+vrDolly.add(vrLogToggle);
+
+let vrLogVisible = false;
+
+// Hook into the existing console override to capture for VR log
+const origLogForVR = console.log;
+const _vrLog = function(type, msg) {
+  const time = new Date().toLocaleTimeString('en-US', {hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  vrLogLines.push({ time, type, msg: String(msg).substring(0, 120) });
+  if (vrLogLines.length > 30) vrLogLines.shift();
+};
+// Patch console again for VR capture
+const _origLog2 = console.log;
+const _origWarn2 = console.warn;
+const _origError2 = console.error;
+console.log = function() { _origLog2.apply(console, arguments); _vrLog('LOG', Array.from(arguments).join(' ')); };
+console.warn = function() { _origWarn2.apply(console, arguments); _vrLog('WRN', Array.from(arguments).join(' ')); };
+console.error = function() { _origError2.apply(console, arguments); _vrLog('ERR', Array.from(arguments).join(' ')); };
+
+function updateVRLog() {
+  const ctx = vrLogCtx;
+  ctx.clearRect(0, 0, 1024, 512);
+  ctx.fillStyle = 'rgba(0,0,0,0.92)';
+  ctx.fillRect(0, 0, 1024, 512);
+  ctx.strokeStyle = '#f59e0b';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(2, 2, 1020, 508);
+
+  ctx.fillStyle = '#f59e0b';
+  ctx.font = 'bold 18px monospace';
+  ctx.fillText('VR DEBUG LOG (amber sphere=toggle, green sphere=download)', 10, 22);
+
+  ctx.font = '14px monospace';
+  let y = 44;
+  vrLogLines.forEach(line => {
+    ctx.fillStyle = line.type === 'ERR' ? '#ef4444' : line.type === 'WRN' ? '#f59e0b' : '#0f0';
+    ctx.fillText(`${line.time} ${line.type}: ${line.msg}`, 10, y);
+    y += 16;
+  });
+  vrLogTexture.needsUpdate = true;
+}
+
+function downloadVRLog() {
+  const text = vrLogLines.map(l => `[${l.time}] ${l.type}: ${l.msg}`).join('\n');
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'beltinator_vr_debug_' + new Date().toISOString().replace(/[:.]/g, '-') + '.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+  console.log('VR debug log downloaded');
+}
+
+function updateVRHud() {
+  // ── Helper: draw panel background ──
+  function drawPanelBg(ctx, w, h) {
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = 'rgba(6, 8, 15, 0.92)';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(8, 8, w-16, h-16, 16);
+    else ctx.rect(8, 8, w-16, h-16);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(34, 211, 238, 0.5)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+  function drawTitle(ctx, text, y) {
+    ctx.fillStyle = '#22d3ee';
+    ctx.font = 'bold 36px monospace';
+    ctx.fillText(text, 30, y || 50);
+    ctx.strokeStyle = 'rgba(34,211,238,0.3)';
+    ctx.beginPath(); ctx.moveTo(30, (y||50)+12); ctx.lineTo(994, (y||50)+12); ctx.stroke();
+  }
+  function drawRow(ctx, label, val, y, valColor) {
+    ctx.fillStyle = '#94a3b8'; ctx.font = '26px monospace'; ctx.fillText(label, 30, y);
+    ctx.fillStyle = valColor || '#f59e0b'; ctx.font = '26px monospace'; ctx.fillText(val, 520, y);
+  }
+
+  const cv = computedValues || {};
+
+  // ═══════════════════════════════════════════
+  // LEFT PANEL: Physics Controls & Presets
+  // ═══════════════════════════════════════════
+  {
+    const ctx = vrPanelLeft.ctx;
+    const w = 1024, h = 1800;
+    drawPanelBg(ctx, w, h);
+    drawTitle(ctx, 'PHYSICS PARAMETERS');
+    ctx.font = '26px monospace';
+    let y = 100;
+    const sliders = [
+      ['L* (Drift Shell)', state.lstar.toFixed(1) + ' RE', '1.0 — 8.0'],
+      ['Energy', state.energy.toFixed(1) + ' MeV', '0.1 — 10.0'],
+      ['Pitch Angle α₀', state.alpha.toFixed(0) + '°', '1 — 89'],
+      ['D_pp (Momentum)', (Math.pow(10, state.dpp)).toExponential(1), 'log -10 to -4'],
+      ['D_αα (Pitch-Angle)', (Math.pow(10, state.daa)).toExponential(1), 'log -8 to -2'],
+      ['Loss τ', state.tau.toFixed(1) + ' days', '0.1 — 30'],
+    ];
+    sliders.forEach(([label, val, range]) => {
+      ctx.fillStyle = '#94a3b8'; ctx.fillText(label, 30, y);
+      ctx.fillStyle = '#f59e0b'; ctx.fillText(val, 560, y);
+      ctx.fillStyle = '#475569'; ctx.font = '20px monospace'; ctx.fillText(range, 800, y);
+      ctx.font = '26px monospace';
+      y += 55;
+    });
+
+    y += 30;
+    ctx.fillStyle = '#22d3ee'; ctx.font = 'bold 30px monospace';
+    ctx.fillText('GEOMAGNETIC CONDITIONS', 30, y); y += 50;
+    ctx.font = '26px monospace';
+    drawRow(ctx, 'Kp Baseline', state.kp.toString(), y); y += 50;
+    drawRow(ctx, 'Dst Index', state.dst.toFixed(0) + ' nT', y); y += 50;
+    drawRow(ctx, 'Solar Wind Vsw', state.vsw.toFixed(0) + ' km/s', y); y += 50;
+
+    y += 20;
+    const stormLevel = currentKpValue < 3 ? 'Quiet' : currentKpValue < 5 ? 'Moderate' : currentKpValue < 7 ? 'Intense' : 'Severe';
+    const stormColor = currentKpValue < 3 ? '#10b981' : currentKpValue < 5 ? '#f59e0b' : '#ef4444';
+    ctx.fillStyle = stormColor; ctx.font = 'bold 32px monospace';
+    ctx.fillText('● ' + stormLevel + ' (Kp ' + currentKpValue.toFixed(1) + ')', 30, y); y += 70;
+
+    ctx.fillStyle = '#22d3ee'; ctx.font = 'bold 30px monospace';
+    ctx.fillText('PRESETS', 30, y); y += 50;
+    const presets = [
+      ['Quiet', '#10b981'], ['Moderate', '#f59e0b'],
+      ['Intense', '#ef4444'], ['Recovery', '#3b82f6']
+    ];
+    presets.forEach(([name, color]) => {
+      ctx.strokeStyle = color; ctx.lineWidth = 3;
+      ctx.strokeRect(30, y-30, 400, 50);
+      ctx.fillStyle = color; ctx.font = '26px monospace';
+      ctx.fillText(name, 60, y);
+      y += 70;
+    });
+
+    y += 20;
+    ctx.fillStyle = '#22d3ee'; ctx.font = 'bold 30px monospace';
+    ctx.fillText('DISPLAY', 30, y); y += 50;
+    ctx.font = '24px monospace';
+    const toggles = [
+      ['Radiation Belts', state.showBelts],
+      ['Satellite Orbits', state.showOrbits],
+      ['Magnetic Field', state.showField],
+      ['Particles', state.showParticles],
+      ['Loss Cone', state.showLossCone],
+      ['Kp(t) Simulation', simRunning],
+    ];
+    toggles.forEach(([label, on]) => {
+      ctx.fillStyle = on ? '#10b981' : '#ef4444';
+      ctx.fillText(on ? '✓' : '✗', 30, y);
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText(label, 70, y);
+      y += 44;
+    });
+
+    y += 20;
+    ctx.fillStyle = '#475569'; ctx.font = '22px monospace';
+    ctx.fillText('Sim: T+' + simTimeHours.toFixed(1) + 'h | Speed: ' + simSpeed + 'x', 30, y);
+
+    vrPanelLeft.texture.needsUpdate = true;
+  }
+
+  // ═══════════════════════════════════════════
+  // CENTER PANEL: Computed Values
+  // ═══════════════════════════════════════════
+  {
+    const ctx = vrPanelCenter.ctx;
+    const w = 1024, h = 1400;
+    drawPanelBg(ctx, w, h);
+    drawTitle(ctx, 'COMPUTED VALUES');
+    ctx.font = '26px monospace';
+    let y = 100;
+    const rows = [
+      ['T(α₀) Bounce Factor', cv.bounceFactor ? cv.bounceFactor.toFixed(4) : '—'],
+      ['Phase Space Density f', cv.psd ? cv.psd.toExponential(2) : '—'],
+      ['Differential Flux j', cv.flux ? cv.flux.toExponential(2) : '—', cv.flux > 1e6 ? '#ef4444' : cv.flux > 1e4 ? '#f59e0b' : '#10b981'],
+      ['D_L*L* (Kp-driven)', cv.dllVal ? cv.dllVal.toExponential(2) : '—', '#22d3ee'],
+      ['Kp(t) Current', currentKpValue.toFixed(1)],
+      ['Magnetopause L_mp', cv.lmp ? cv.lmp.toFixed(1) + ' RE' : '—'],
+      ['Last Closed Drift Shell', cv.lcds ? cv.lcds.toFixed(1) + ' RE' : '—'],
+      ['Bounce Loss Cone α_BLC', cv.blc ? cv.blc.toFixed(1) + '°' : '—'],
+      ['Drift Loss Cone α_DLC', cv.dlc ? cv.dlc.toFixed(1) + '°' : '—'],
+      ['Particle Status', cv.status || '—',
+        cv.status === 'Stably Trapped' ? '#10b981' : cv.status === 'Drift Loss Cone' ? '#f59e0b' : '#ef4444'],
+    ];
+    rows.forEach(([label, val, color]) => {
+      drawRow(ctx, label, val, y, color);
+      y += 58;
+    });
+
+    // Kp timeline visual
+    y += 30;
+    ctx.fillStyle = '#22d3ee'; ctx.font = 'bold 28px monospace';
+    ctx.fillText('Kp TIMELINE (24h)', 30, y); y += 40;
+    if (typeof kpTimeline !== 'undefined' && kpTimeline.length === 8) {
+      for (let i = 0; i < 8; i++) {
+        const kp = kpTimeline[i];
+        const barW = (kp / 9) * 600;
+        const isCurrent = i === currentKpIndex;
+        ctx.fillStyle = isCurrent ? '#22d3ee' : kp > 6 ? '#ef4444' : kp > 3 ? '#f59e0b' : '#10b981';
+        ctx.fillRect(160, y - 16, barW, 26);
+        ctx.fillStyle = '#475569'; ctx.font = '20px monospace';
+        ctx.fillText((i*3) + '-' + ((i+1)*3) + 'h', 30, y);
+        ctx.fillStyle = '#e2e8f0'; ctx.fillText(kp.toFixed(1), 780, y);
+        y += 36;
+      }
+    }
+
+    // Satellite legend
+    y += 30;
+    ctx.fillStyle = '#22d3ee'; ctx.font = 'bold 28px monospace';
+    ctx.fillText('SATELLITES (trigger to zoom)', 30, y); y += 44;
+    ctx.font = '24px monospace';
+    const sats = [
+      ['RBSP (Van Allen Probes)', '#ef4444'],
+      ['THEMIS A / D / E', '#3b82f6'],
+      ['GOES (GEO)', '#10b981'],
+      ['LEO Satellites', '#f59e0b'],
+      ['Lomonosov', '#a855f7'],
+    ];
+    sats.forEach(([name, color]) => {
+      ctx.fillStyle = color; ctx.fillRect(30, y-14, 18, 18);
+      ctx.fillStyle = '#94a3b8'; ctx.fillText(name, 60, y);
+      y += 40;
+    });
+
+    vrPanelCenter.texture.needsUpdate = true;
+  }
+
+  // ═══════════════════════════════════════════
+  // RIGHT PANEL: Equations & Physics Info
+  // ═══════════════════════════════════════════
+  {
+    const ctx = vrPanelRight.ctx;
+    const w = 1024, h = 1600;
+    drawPanelBg(ctx, w, h);
+    drawTitle(ctx, 'GOVERNING EQUATIONS');
+    let y = 100;
+
+    const equations = [
+      { label: 'Eq.1 — Generalized Diffusion', eq: '∂f/∂t = ∂/∂Jᵢ (Dᵢⱼ ∂f/∂Jⱼ)' },
+      { label: 'Eq.2 — Fokker-Planck', eq: '∂f/∂t = L*² ∂/∂L*(D_LL/L*² ∂f/∂L*) + ... − f/τ' },
+      { label: 'T(α₀) Bounce Period', eq: 'T(α₀) = 1.3802 − 0.3198·(sinα₀ + sin²α₀)' },
+      { label: 'D_LL(Kp) — B&A 2000', eq: 'D_LL = D₀·10^(0.506·Kp − 9.325)·L*¹⁰' },
+    ];
+    equations.forEach(({label, eq}) => {
+      ctx.fillStyle = '#22d3ee'; ctx.font = 'bold 22px monospace';
+      ctx.fillText(label, 30, y); y += 36;
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fillRect(30, y-22, 964, 40);
+      ctx.fillStyle = '#f59e0b'; ctx.font = '24px monospace';
+      ctx.fillText(eq, 40, y+6); y += 65;
+    });
+
+    y += 20;
+    ctx.fillStyle = '#22d3ee'; ctx.font = 'bold 28px monospace';
+    ctx.fillText('RADIATION BELT PHYSICS', 30, y); y += 44;
+    ctx.fillStyle = '#94a3b8'; ctx.font = '22px monospace';
+    const physicsLines = [
+      'Relativistic electrons (>500 keV) undergo',
+      'three periodic motions: gyration (μ),',
+      'bounce (J), and azimuthal drift (Φ = L*).',
+      'ULF waves drive radial diffusion, chorus',
+      'waves produce local acceleration, and',
+      'magnetopause shadowing causes loss.',
+      '',
+      'In plain terms: High-energy particles',
+      'get trapped by Earth\'s magnetic field in',
+      'donut-shaped belts. During storms, waves',
+      'pump energy into the belts, making radiation',
+      'more intense and dangerous to satellites.',
+    ];
+    physicsLines.forEach(line => {
+      if (line === '') { y += 16; return; }
+      ctx.fillStyle = line.startsWith('In plain') ? '#f59e0b' : '#94a3b8';
+      ctx.fillText(line, 30, y);
+      y += 32;
+    });
+
+    y += 30;
+    ctx.fillStyle = '#22d3ee'; ctx.font = 'bold 28px monospace';
+    ctx.fillText('MAGNETIC FIELD NOTES', 30, y); y += 44;
+    ctx.fillStyle = '#94a3b8'; ctx.font = '22px monospace';
+    const fieldLines = [
+      'The local B-field determines energy from μ.',
+      'Small ΔB errors → large flux errors at high L.',
+      'At LEO: Trapped, BLC, DLC populations.',
+      '',
+      'In plain terms: Earth\'s magnetic field',
+      'acts as an invisible container. Even small',
+      'measurement errors can lead to very wrong',
+      'radiation estimates for satellite safety.',
+    ];
+    fieldLines.forEach(line => {
+      if (line === '') { y += 16; return; }
+      ctx.fillStyle = line.startsWith('In plain') ? '#f59e0b' : '#94a3b8';
+      ctx.fillText(line, 30, y);
+      y += 32;
+    });
+
+    vrPanelRight.texture.needsUpdate = true;
+  }
+}
+
+// ── VR Session Events ─────────────────────────────────────────────
+renderer.xr.addEventListener('sessionstart', () => {
+  isInVR = true;
+  console.log('renderer.xr sessionstart fired');
+
+  // Position user 16 units from Earth (outside all belts), slightly above
+  vrDolly.position.set(0, 3, 16);
+  vrDolly.rotation.set(0, 0, 0);
+  console.log('VR dolly positioned at (0, 3, 16) — user outside belts');
+
+  // Show all VR panels
+  vrPanelLeft.mesh.visible = true;
+  vrPanelCenter.mesh.visible = true;
+  vrPanelRight.mesh.visible = true;
+  vrHudToggle.visible = true;
+  vrLogToggle.visible = true;
+  vrLogDownload.visible = true;
+  console.log('VR panels positioned. Dolly at:', vrDolly.position.toArray().map(v=>v.toFixed(1)).join(','));
+  console.log('Controllers: c0 parent=' + (controller0.parent ? controller0.parent.type : 'none') + ', c1 parent=' + (controller1.parent ? controller1.parent.type : 'none'));
+  positionVRHud();
+
+  vrHudNeedsUpdate = true;
+});
+
+renderer.xr.addEventListener('sessionend', () => {
+  isInVR = false;
+  console.log('renderer.xr sessionend fired');
+  vrDolly.position.set(0, 0, 0);
+  vrDolly.rotation.set(0, 0, 0);
+  vrPanelLeft.mesh.visible = false;
+  vrPanelCenter.mesh.visible = false;
+  vrPanelRight.mesh.visible = false;
+  vrHudToggle.visible = false;
+  vrLogToggle.visible = false;
+  vrLogDownload.visible = false;
+  vrLogPanel.visible = false;
+});
+
+function positionVRHud() {
+  // Panels are children of vrDolly, so positions are relative to the user.
+  // User's eyes are at approximately (0, 1.6, 0) in dolly-local space.
+  // Place panels to the LEFT and RIGHT at eye level, angled inward.
+
+  // LEFT panel: to the left, angled 45° toward user
+  vrPanelLeft.mesh.position.set(-3.5, 1.6, -1.0);
+  vrPanelLeft.mesh.rotation.set(0, Math.PI / 4, 0); // face right toward user
+
+  // CENTER panel: forward-left
+  vrPanelCenter.mesh.position.set(-1.5, 1.6, -3.0);
+  vrPanelCenter.mesh.rotation.set(0, Math.PI / 6, 0); // slight angle
+
+  // RIGHT panel: to the right, angled toward user
+  vrPanelRight.mesh.position.set(3.5, 1.6, -1.0);
+  vrPanelRight.mesh.rotation.set(0, -Math.PI / 4, 0); // face left toward user
+
+  // Toggle sphere: above and forward, easy to find
+  vrHudToggle.position.set(0, 2.8, -2.5);
+}
+
+// ── VR Interaction Logic (runs in animate loop) ───────────────────
+const vrRaycaster = new THREE.Raycaster();
+let vrGrabbing = false;
+let vrGrabStartPos = new THREE.Vector3();
+let vrGrabStartDollyPos = new THREE.Vector3();
+let vrPrevGripDist = 0;
+
+function updateVRInteraction(dt) {
+  if (!isInVR) return;
+  try {
+
+  // Get controller world positions
+  const c0Pos = new THREE.Vector3();
+  const c1Pos = new THREE.Vector3();
+  controller0.getWorldPosition(c0Pos);
+  controller1.getWorldPosition(c1Pos);
+
+  // ── BOTH GRIPS: Zoom (change dolly distance from origin) ────────
+  if (vrSqueeze[0] && vrSqueeze[1]) {
+    const gripDist = c0Pos.distanceTo(c1Pos);
+    if (vrPrevGripDist > 0) {
+      const delta = gripDist - vrPrevGripDist;
+      const dir = vrDolly.position.clone().normalize();
+      const currentDist = vrDolly.position.length();
+      const newDist = Math.max(2, Math.min(40, currentDist - delta * 30));
+      vrDolly.position.copy(dir.multiplyScalar(newDist));
+    }
+    vrPrevGripDist = gripDist;
+  } else {
+    vrPrevGripDist = 0;
+  }
+
+  // ── SINGLE GRIP: Also zoom (one hand squeeze + move forward/back) ──
+  const singleGrip = (vrSqueeze[0] && !vrSqueeze[1]) ? 0 : (!vrSqueeze[0] && vrSqueeze[1]) ? 1 : -1;
+  if (singleGrip >= 0) {
+    const currentPos = singleGrip === 0 ? c0Pos : c1Pos;
+    const prevPos = vrPrevControllerPos[singleGrip];
+    if (vrGrabbing) {
+      const delta = currentPos.clone().sub(prevPos);
+      // Forward/back movement = zoom
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(vrDolly.quaternion);
+      const zoomDelta = delta.dot(fwd) * 20;
+      const dir = vrDolly.position.clone().normalize();
+      const currentDist = vrDolly.position.length();
+      const newDist = Math.max(2, Math.min(40, currentDist - zoomDelta));
+      vrDolly.position.copy(dir.multiplyScalar(newDist));
+    }
+    vrPrevControllerPos[singleGrip].copy(currentPos);
+    vrGrabbing = true;
+  }
+  if (singleGrip < 0 && !vrSqueeze[0] && !vrSqueeze[1]) vrGrabbing = false;
+
+  // ── TRIGGER: Grab-rotate (hold) OR satellite select (tap) ───────
+  // Track how long trigger is held to distinguish tap from hold
+  for (let ci = 0; ci < 2; ci++) {
+    const key = 'triggerStart' + ci;
+    const holdKey = 'triggerHolding' + ci;
+
+    if (vrSelect[ci]) {
+      if (!vrSelect[key]) {
+        // Trigger just pressed — record timestamp
+        vrSelect[key] = performance.now();
+        vrSelect[holdKey] = false;
+      }
+
+      const holdDuration = performance.now() - vrSelect[key];
+
+      if (holdDuration > 200) {
+        // HOLD: Grab and rotate the scene
+        vrSelect[holdKey] = true;
+        const currentPos = ci === 0 ? c0Pos : c1Pos;
+        const prevPos = vrPrevControllerPos[ci];
+
+        if (vrSelect['rotating' + ci]) {
+          const delta = currentPos.clone().sub(prevPos);
+          const yaw = -delta.x * 4.0;
+          const pitch = delta.y * 3.0;
+
+          const pos = vrDolly.position.clone();
+          const dist = pos.length();
+          const angle = Math.atan2(pos.x, pos.z) + yaw;
+          const elev = Math.asin(Math.min(1, Math.max(-1, pos.y / dist))) + pitch;
+          const clampedElev = Math.max(-1.2, Math.min(1.2, elev));
+          vrDolly.position.set(
+            dist * Math.cos(clampedElev) * Math.sin(angle),
+            dist * Math.sin(clampedElev),
+            dist * Math.cos(clampedElev) * Math.cos(angle)
+          );
+          vrDolly.lookAt(0, 0, 0);
+          positionVRHud();
+        }
+        vrSelect['rotating' + ci] = true;
+        vrPrevControllerPos[ci].copy(currentPos);
+      }
+    } else {
+      // Trigger released
+      if (vrSelect[key]) {
+        const holdDuration = performance.now() - vrSelect[key];
+
+        if (holdDuration < 200 && !vrSelect[holdKey]) {
+          // TAP: Raycast for satellite select or HUD toggle
+          try {
+            const ctrl = ci === 0 ? controller0 : controller1;
+            const tempMatrix = new THREE.Matrix4();
+            tempMatrix.identity().extractRotation(ctrl.matrixWorld);
+            vrRaycaster.ray.origin.setFromMatrixPosition(ctrl.matrixWorld);
+            vrRaycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+
+            // Check HUD toggle sphere (cyan)
+            const toggleHits = vrRaycaster.intersectObject(vrHudToggle);
+            if (toggleHits.length > 0) {
+              vrHudVisible = !vrHudVisible;
+              vrPanelLeft.mesh.visible = vrHudVisible;
+              vrPanelCenter.mesh.visible = vrHudVisible;
+              vrPanelRight.mesh.visible = vrHudVisible;
+              console.log('HUD toggled: ' + vrHudVisible);
+            }
+            // Check VR log toggle sphere (amber)
+            else if (vrRaycaster.intersectObject(vrLogToggle).length > 0) {
+              vrLogVisible = !vrLogVisible;
+              vrLogPanel.visible = vrLogVisible;
+              console.log('VR log toggled: ' + vrLogVisible);
+            }
+            // Check VR log download sphere (green)
+            else if (vrRaycaster.intersectObject(vrLogDownload).length > 0) {
+              downloadVRLog();
+            }
+            else {
+              // Check satellites — collect all satellite meshes
+              vrRaycaster.params.Points = { threshold: 0.8 };
+              const satMeshes = [];
+              orbitGroup.children.forEach(orbit => {
+                orbit.children.forEach(child => {
+                  if (child.userData && child.userData.satName) satMeshes.push(child);
+                  // Also check grandchildren (satellite dots inside orbit groups)
+                  if (child.children) child.children.forEach(gc => {
+                    if (gc.userData && gc.userData.satName) satMeshes.push(gc);
+                  });
+                });
+              });
+
+              if (satMeshes.length > 0) {
+                const satHits = vrRaycaster.intersectObjects(satMeshes, true);
+                if (satHits.length > 0) {
+                  let obj = satHits[0].object;
+                  while (obj && !(obj.userData && obj.userData.satName)) obj = obj.parent;
+                  if (obj && obj.userData && obj.userData.satName) {
+                    console.log('VR satellite selected: ' + obj.userData.satName);
+                    zoomToSatellite(obj);
+                  }
+                } else if (isZoomedOnSat) {
+                  // Tap empty space while zoomed = zoom back
+                  zoomBackToOverview();
+                  console.log('VR zoom back to overview');
+                }
+              } else if (isZoomedOnSat) {
+                zoomBackToOverview();
+                console.log('VR zoom back to overview (no sats found)');
+              }
+            }
+          } catch(e) {
+            console.error('VR tap error:', e.message);
+          }
+        }
+      }
+      // Reset trigger state
+      vrSelect[key] = null;
+      vrSelect[holdKey] = false;
+      vrSelect['rotating' + ci] = false;
+    }
+  }
+
+  // ── Update HUD every ~30 frames ─────────────────────────────────
+  if (vrHudVisible) {
+    vrHudNeedsUpdate = !vrHudNeedsUpdate;
+    if (vrHudNeedsUpdate) updateVRHud();
+  }
+
+  // ── Update VR debug log ─────────────────────────────────────────
+  if (vrLogVisible && vrLogPanel.visible) {
+    updateVRLog();
+  }
+
+  // ── VR Satellite Tracking (smooth dolly movement toward target) ──
+  if (isInVR && isZoomedOnSat && trackingSatellite) {
+    const satWorldPos = new THREE.Vector3();
+    trackingSatellite.getWorldPosition(satWorldPos);
+    const offset = satWorldPos.clone().normalize().multiplyScalar(3.5);
+    offset.y += 1.5;
+    const targetDollyPos = satWorldPos.clone().add(offset);
+    vrDolly.position.lerp(targetDollyPos, 0.04);
+    // Don't use vrDolly.lookAt — it rotates the panels too
+    // The headset tracking handles view direction
+  }
+
+  } catch(e) {
+    console.error('VR interaction error:', e.message);
+  }
+}
+
+// Raycaster for satellite picking
+const raycaster = new THREE.Raycaster();
+raycaster.params.Points = { threshold: 0.3 };
+const mouse = new THREE.Vector2();
+
+// Lighting
+scene.add(new THREE.AmbientLight(0x2a3456, 0.6));
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+dirLight.position.set(10, 10, 5);
+scene.add(dirLight);
+const pointLight = new THREE.PointLight(0x3b82f6, 0.4, 30);
+pointLight.position.set(-5, 3, -5);
+scene.add(pointLight);
+const sunLight = new THREE.PointLight(0xfff4e6, 0.3, 50);
+sunLight.position.set(20, 5, 0);
+scene.add(sunLight);
+
+// (VR info panel will be added once basic VR rendering works)
+
+// Store computed values for display
+let computedValues = {};
+let simTimeHours_display = 0;
+
+// ==================== STATE ====================
+const state = {
+  lstar: 4.5, energy: 1.0, alpha: 45, dll: -6, dpp: -7, daa: -5, dap: -10, tau: 10,
+  kp: 3, dst: -30, vsw: 400,
+  showBelts: true, showOrbits: true, showField: true, showParticles: true, showLossCone: false, mixedTerms: false
+};
+
+// ==================== KP TIME-DEPENDENT SYSTEM ====================
+let simRunning = true;
+let simSpeed = 60; // 60× real time (1 sim-second = 1 sim-minute)
+let simTimeHours = 0; // elapsed simulation hours
+let kpTimeline = []; // 8 Kp values for 24h (3h cadence)
+let currentKpIndex = 0;
+let currentKpValue = 3;
+let currentDLL = -6;
+
+function generateKpTimeline(baseKp) {
+  // Generate a 24h Kp profile: 8 bins of 3 hours each
+  // Storm-like pattern: ramp up, peak, gradual decay, with noise
+  const timeline = [];
+  for (let i = 0; i < 8; i++) {
+    // Create a storm-like envelope centered around bin 3
+    const stormPhase = Math.exp(-0.5 * Math.pow((i - 3) / 1.8, 2));
+    const stormAmplitude = baseKp * 0.5;
+    const kpVal = Math.max(0, Math.min(9,
+      baseKp + stormAmplitude * stormPhase + (Math.random() - 0.5) * 1.5
+    ));
+    timeline.push(Math.round(kpVal * 10) / 10);
+  }
+  return timeline;
+}
+
+function computeDLL_Kp(kp, L) {
+  // Brautigam & Albert (2000): D_LL = D0 * 10^(0.506*Kp - 9.325) * L^10
+  const logDLL = 0.506 * kp - 9.325 + 10 * Math.log10(Math.max(1, L));
+  return logDLL; // return as log10
+}
+
+function renderKpTimeline() {
+  const container = document.getElementById('kp-timeline');
+  container.innerHTML = '';
+  kpTimeline.forEach((kp, i) => {
+    const bar = document.createElement('div');
+    bar.className = 'kp-bar' + (i === currentKpIndex ? ' current' : '');
+    const h = Math.max(2, (kp / 9) * 18);
+    bar.style.height = h + 'px';
+    if (kp <= 3) bar.style.background = 'var(--accent-green)';
+    else if (kp <= 6) bar.style.background = 'var(--accent-amber)';
+    else bar.style.background = 'var(--accent-red)';
+    bar.title = `${i*3}–${(i+1)*3}h: Kp=${kp.toFixed(1)}`;
+    container.appendChild(bar);
+  });
+}
+
+// Initialize Kp timeline
+kpTimeline = generateKpTimeline(state.kp);
+renderKpTimeline();
+
+// ==================== CAMERA TRACKING SYSTEM ====================
+let camH = 0.7, camV = 0.45, camDist = 16;
+let camTargetH = camH, camTargetV = camV, camTargetDist = camDist;
+let camLookAt = new THREE.Vector3(0, 0, 0);
+let camTargetLookAt = new THREE.Vector3(0, 0, 0);
+let trackingSatellite = null; // reference to tracked satellite dot mesh
+let isZoomedOnSat = false;
+const CAM_LERP = 0.04;
+
+function zoomToSatellite(satDot) {
+  trackingSatellite = satDot;
+  isZoomedOnSat = true;
+  camTargetDist = 3.5;
+
+  // DOM updates only when not in VR (VR uses the dolly system instead)
+  if (!isInVR) {
+    try {
+      document.getElementById('zoom-back-btn').classList.add('visible');
+      const info = getSatelliteInfo(satDot.userData.satName);
+      document.getElementById('sat-tooltip-name').textContent = info.name;
+      document.getElementById('sat-tooltip-detail').innerHTML = info.detail;
+      document.getElementById('sat-tooltip').classList.add('visible');
+    } catch(e) { console.warn('zoomToSat DOM error:', e.message); }
+  } else {
+    console.log('VR zoom to: ' + (satDot.userData.satName || 'unknown'));
+  }
+}
+
+function zoomBackToOverview() {
+  trackingSatellite = null;
+  isZoomedOnSat = false;
+  camTargetDist = 16;
+  camTargetLookAt.set(0, 0, 0);
+
+  if (!isInVR) {
+    try {
+      document.getElementById('zoom-back-btn').classList.remove('visible');
+      document.getElementById('sat-tooltip').classList.remove('visible');
+    } catch(e) { console.warn('zoomBack DOM error:', e.message); }
+  } else {
+    // Reset dolly to overview position
+    vrDolly.position.set(0, 3, 16);
+    console.log('VR zoom back to overview');
+  }
+}
+
+function focusSatByName(name) {
+  // Find satellite dot by name
+  orbitGroup.children.forEach(orbit => {
+    orbit.children.forEach(child => {
+      if (child.userData.satName === name) {
+        zoomToSatellite(child);
+      }
+    });
+  });
+}
+
+function getSatelliteInfo(name) {
+  const infos = {
+    'RBSP':     { name: 'Van Allen Probes (RBSP A/B)', detail: 'Orbit: ~600 km × 5.8 R<sub>E</sub> (HEO)<br>Inc: 10°<br>Mission: Radiation belt dynamics<br>Instruments: REPT, MagEIS, EMFISIS' },
+    'THEMIS-A': { name: 'THEMIS-A', detail: 'Orbit: ~1.5 × 12 R<sub>E</sub><br>Inc: ~5°<br>Mission: Substorm onset physics<br>Instruments: SST, ESA, FGM' },
+    'THEMIS-D': { name: 'THEMIS-D', detail: 'Orbit: ~2 × 12 R<sub>E</sub><br>Inc: ~8°<br>Constellation member for multi-point measurements' },
+    'THEMIS-E': { name: 'THEMIS-E', detail: 'Orbit: ~2.5 × 12 R<sub>E</sub><br>Inc: ~6°<br>Outer magnetosphere monitor' },
+    'GOES':     { name: 'GOES (Geostationary)', detail: 'Orbit: 6.6 R<sub>E</sub> (GEO)<br>Inc: 0°<br>SEISS &amp; MAG instruments<br>Continuous radiation monitoring' },
+    'LEO':      { name: 'LEO Constellation', detail: 'Orbit: ~400–800 km altitude<br>Inc: ~80°<br>Samples trapped + loss cone<br>BLC/DLC classification critical' },
+    'Lomonosov':{ name: 'Lomonosov', detail: 'Orbit: ~490 km (SSO)<br>Inc: 98°<br>Mission: Multi-messenger astrophysics<br>Electron/gamma measurements' }
+  };
+  return infos[name] || { name: name, detail: '' };
+}
+
+// ==================== EARTH ====================
+const earthGeo = new THREE.SphereGeometry(1, 64, 64);
+const earthMat = new THREE.MeshPhongMaterial({ color: 0x1565c0, emissive: 0x0d47a1, emissiveIntensity: 0.12, shininess: 25 });
+const earth = new THREE.Mesh(earthGeo, earthMat);
+scene.add(earth);
+
+const gridMat = new THREE.LineBasicMaterial({ color: 0x42a5f5, transparent: true, opacity: 0.15 });
+for (let i = 0; i < 12; i++) {
+  const angle = (i / 12) * Math.PI * 2;
+  const pts = [];
+  for (let j = 0; j <= 64; j++) {
+    const phi = (j / 64) * Math.PI * 2;
+    pts.push(new THREE.Vector3(1.005 * Math.cos(phi) * Math.cos(angle), 1.005 * Math.sin(phi), 1.005 * Math.cos(phi) * Math.sin(angle)));
+  }
+  earth.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), gridMat));
+}
+for (let lat = -60; lat <= 60; lat += 30) {
+  const r = Math.cos(lat * Math.PI / 180) * 1.006;
+  const y = Math.sin(lat * Math.PI / 180) * 1.006;
+  const pts = [];
+  for (let j = 0; j <= 64; j++) {
+    const phi = (j / 64) * Math.PI * 2;
+    pts.push(new THREE.Vector3(r * Math.cos(phi), y, r * Math.sin(phi)));
+  }
+  earth.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), gridMat));
+}
+
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(1.1, 32, 32), new THREE.MeshBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.06, side: THREE.BackSide })));
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(1.15, 32, 32), new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.03, side: THREE.BackSide })));
+
+// ==================== RADIATION BELTS ====================
+const beltGroup = new THREE.Group();
+scene.add(beltGroup);
+
+function createBelt(innerR, outerR, height, color, opacity) {
+  const geo = new THREE.TorusGeometry((innerR + outerR) / 2, (outerR - innerR) / 2, 32, 64);
+  const mat = new THREE.MeshPhongMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = Math.PI / 2;
+  mesh.scale.y = height;
+  return mesh;
+}
+
+function buildBelts() {
+  beltGroup.clear();
+  const kpNow = currentKpValue;
+  const kpScale = 1 + kpNow * 0.07;
+  const si = Math.min(1, kpNow / 9);
+
+  beltGroup.add(createBelt(1.5, 2.5, 0.45, 0xef4444, 0.1 + si * 0.05));
+  beltGroup.add(createBelt(1.7, 2.2, 0.3, 0xff6f00, 0.15 + si * 0.05));
+  beltGroup.add(createBelt(2.4, 3.1, 0.25, 0x1a237e, 0.04));
+  beltGroup.add(createBelt(3.0 * kpScale, 6.0 * kpScale, 0.65, 0x3b82f6, 0.08 + si * 0.06));
+  beltGroup.add(createBelt(3.5 * kpScale, 5.0 * kpScale, 0.45, 0x22d3ee, 0.12 + si * 0.06));
+  beltGroup.add(createBelt(4.0 * kpScale, 4.8 * kpScale, 0.3, 0xfdd835, 0.12 + si * 0.08));
+  if (kpNow >= 5) beltGroup.add(createBelt(2.8, 3.5, 0.5, 0xef4444, si * 0.1));
+}
+buildBelts();
+
+// ==================== MAGNETIC FIELD LINES ====================
+const fieldGroup = new THREE.Group();
+scene.add(fieldGroup);
+
+function dipoleFieldLine(L, nPts, color) {
+  const pts = [];
+  for (let i = 0; i <= nPts; i++) {
+    const theta = (i / nPts) * Math.PI;
+    const r = L * Math.sin(theta) * Math.sin(theta);
+    pts.push(new THREE.Vector3(r * Math.sin(theta), r * Math.cos(theta), 0));
+  }
+  return new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.2 }));
+}
+
+function buildFieldLines() {
+  fieldGroup.clear();
+  [2, 3, 4, 5, 6, 7, 8].forEach(L => {
+    for (let m = 0; m < 8; m++) {
+      const line = dipoleFieldLine(L, 60, 0x3b82f6);
+      line.rotation.y = (m / 8) * Math.PI * 2;
+      fieldGroup.add(line);
+    }
+  });
+}
+buildFieldLines();
+
+// ==================== L-SHELL INDICATOR ====================
+const lshellGroup = new THREE.Group();
+scene.add(lshellGroup);
+
+function buildLshell() {
+  lshellGroup.clear();
+  const L = state.lstar;
+  const pts = [];
+  for (let i = 0; i <= 128; i++) {
+    const a = (i / 128) * Math.PI * 2;
+    pts.push(new THREE.Vector3(L * Math.cos(a), 0, L * Math.sin(a)));
+  }
+  lshellGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.65 })));
+  for (let m = 0; m < 4; m++) {
+    const line = dipoleFieldLine(L, 80, 0xf59e0b);
+    line.material.opacity = 0.45;
+    line.rotation.y = (m / 4) * Math.PI * 2;
+    lshellGroup.add(line);
+  }
+
+  const alphaRad = state.alpha * Math.PI / 180;
+  const thetaMirror = Math.asin(Math.pow(Math.sin(alphaRad), 1/3));
+  if (thetaMirror && isFinite(thetaMirror)) {
+    const rMirror = L * Math.sin(thetaMirror) * Math.sin(thetaMirror);
+    const mirrorGeo = new THREE.SphereGeometry(0.08, 8, 8);
+    const mirrorMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+    for (let m = 0; m < 4; m++) {
+      const angle = (m / 4) * Math.PI * 2;
+      const xm = rMirror * Math.sin(thetaMirror);
+      const ym = rMirror * Math.cos(thetaMirror);
+      const dotN = new THREE.Mesh(mirrorGeo, mirrorMat);
+      dotN.position.set(xm * Math.cos(angle), ym, xm * Math.sin(angle));
+      lshellGroup.add(dotN);
+      const dotS = new THREE.Mesh(mirrorGeo, mirrorMat);
+      dotS.position.set(xm * Math.cos(angle), -ym, xm * Math.sin(angle));
+      lshellGroup.add(dotS);
+    }
+  }
+}
+buildLshell();
+
+// ==================== SATELLITE ORBITS ====================
+const orbitGroup = new THREE.Group();
+scene.add(orbitGroup);
+const allSatDots = []; // flat list of all satellite dot meshes for raycasting
+
+function createOrbit(semiMajor, ecc, inc, color, name) {
+  const pts = [];
+  for (let i = 0; i <= 128; i++) {
+    const theta = (i / 128) * Math.PI * 2;
+    const r = semiMajor * (1 - ecc * ecc) / (1 + ecc * Math.cos(theta));
+    const x = r * Math.cos(theta);
+    const z = r * Math.sin(theta);
+    const incRad = inc * Math.PI / 180;
+    pts.push(new THREE.Vector3(x, z * Math.sin(incRad), z * Math.cos(incRad)));
+  }
+  const line = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.5 })
+  );
+  line.userData.satName = name;
+
+  // Larger hit-target sphere (invisible) + visible dot
+  const dotGeo = new THREE.SphereGeometry(0.1, 12, 12);
+  const dot = new THREE.Mesh(dotGeo, new THREE.MeshBasicMaterial({ color }));
+  dot.userData = { orbitRadius: semiMajor, eccentricity: ecc, inclination: inc, phase: Math.random() * Math.PI * 2, speed: 0.25 / semiMajor, satName: name, satColor: color };
+
+  // Invisible hit sphere (bigger for easier clicking)
+  const hitGeo = new THREE.SphereGeometry(0.35, 8, 8);
+  const hitMat = new THREE.MeshBasicMaterial({ visible: false });
+  const hitSphere = new THREE.Mesh(hitGeo, hitMat);
+  hitSphere.userData = { isSatHitbox: true, satDot: dot, satName: name };
+  dot.add(hitSphere);
+
+  // Glow ring around satellite
+  const ringGeo = new THREE.RingGeometry(0.15, 0.22, 16);
+  const ringMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.lookAt(camera.position);
+  dot.add(ring);
+  dot.userData.ring = ring;
+
+  // Name label sprite
+  const canvas = document.createElement('canvas');
+  canvas.width = 256; canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  ctx.font = 'bold 28px monospace';
+  ctx.fillStyle = '#' + new THREE.Color(color).getHexString();
+  ctx.fillText(name, 4, 36);
+  const tex = new THREE.CanvasTexture(canvas);
+  const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.8, depthWrite: false });
+  const sprite = new THREE.Sprite(spriteMat);
+  sprite.scale.set(1.2, 0.3, 1);
+  sprite.position.y = 0.35;
+  dot.add(sprite);
+
+  line.add(dot);
+  allSatDots.push(dot);
+  return line;
+}
+
+function buildOrbits() {
+  orbitGroup.clear();
+  allSatDots.length = 0;
+  orbitGroup.add(createOrbit(3.3, 0.67, 10, 0xef4444, 'RBSP'));
+  orbitGroup.add(createOrbit(5.5, 0.35, 5, 0x3b82f6, 'THEMIS-A'));
+  orbitGroup.add(createOrbit(7.0, 0.4, 8, 0x3b82f6, 'THEMIS-D'));
+  orbitGroup.add(createOrbit(8.5, 0.45, 6, 0x3b82f6, 'THEMIS-E'));
+  orbitGroup.add(createOrbit(6.6, 0.0, 0, 0x10b981, 'GOES'));
+  orbitGroup.add(createOrbit(1.12, 0.0, 80, 0xf59e0b, 'LEO'));
+  orbitGroup.add(createOrbit(1.15, 0.0, 98, 0xa855f7, 'Lomonosov'));
+}
+buildOrbits();
+
+// ==================== PARTICLES ====================
+const particleGroup = new THREE.Group();
+scene.add(particleGroup);
+
+const NUM_PARTICLES = 350;
+const pPos = new Float32Array(NUM_PARTICLES * 3);
+const pCol = new Float32Array(NUM_PARTICLES * 3);
+const pMeta = [];
+
+for (let i = 0; i < NUM_PARTICLES; i++) {
+  const L = 1.5 + Math.random() * 6;
+  const phi = Math.random() * Math.PI * 2;
+  const theta = (Math.random() - 0.5) * 0.8;
+  pMeta.push({ L, phi, theta, gyroPhase: Math.random() * Math.PI * 2, bouncePhase: Math.random() * Math.PI * 2, driftSpeed: 0.15 + Math.random() * 0.35, bounceSpeed: 0.4 + Math.random() * 1.2, gyroRadius: 0.015 + Math.random() * 0.04 });
+  const idx = i * 3;
+  pPos[idx] = L * Math.cos(phi); pPos[idx+1] = theta; pPos[idx+2] = L * Math.sin(phi);
+  const t = (L - 1.5) / 6;
+  pCol[idx] = 0.15 + t * 0.85; pCol[idx+1] = 0.8 - t * 0.55; pCol[idx+2] = 1.0 - t * 0.75;
+}
+
+const pGeo = new THREE.BufferGeometry();
+pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3));
+particleGroup.add(new THREE.Points(pGeo, new THREE.PointsMaterial({ size: 0.055, vertexColors: true, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false })));
+
+// ==================== LOSS CONE ====================
+const lossConeGroup = new THREE.Group();
+scene.add(lossConeGroup);
+lossConeGroup.visible = false;
+
+function buildLossCone() {
+  lossConeGroup.clear();
+  const coneAngle = Math.asin(Math.sqrt(1 / (state.lstar ** 3)));
+  const h = 3, r = Math.tan(coneAngle) * h;
+  const coneGeo = new THREE.ConeGeometry(r, h, 32, 1, true);
+  const coneMat = new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false });
+  const cN = new THREE.Mesh(coneGeo, coneMat); cN.position.y = h/2; lossConeGroup.add(cN);
+  const cS = new THREE.Mesh(coneGeo.clone(), coneMat.clone()); cS.position.y = -h/2; cS.rotation.x = Math.PI; lossConeGroup.add(cS);
+}
+
+// ==================== STARS ====================
+const starPos = new Float32Array(4000 * 3);
+for (let i = 0; i < 4000 * 3; i++) starPos[i] = (Math.random() - 0.5) * 160;
+scene.add(new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(starPos, 3)) || new THREE.BufferGeometry(), new THREE.PointsMaterial({ color: 0xffffff, size: 0.08, transparent: true, opacity: 0.5 })));
+
+// Fix: create star geometry properly
+const starGeo2 = new THREE.BufferGeometry();
+starGeo2.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+// already added via Points above, but let's ensure it's correct
+
+// ==================== MOUSE / TOUCH CONTROLS ====================
+let isDragging = false, prevMousePos = { x: 0, y: 0 }, mouseDownTime = 0;
+
+renderer.domElement.addEventListener('mousedown', e => {
+  mouseDownTime = performance.now();
+  if (e.clientX > 330 && e.clientX < window.innerWidth - 360) {
+    isDragging = true;
+    prevMousePos = { x: e.clientX, y: e.clientY };
+    container.classList.add('grabbing');
+  }
+});
+
+window.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  if (!isZoomedOnSat) {
+    camH += (e.clientX - prevMousePos.x) * 0.005;
+    camV = Math.max(-1.2, Math.min(1.2, camV + (e.clientY - prevMousePos.y) * 0.005));
+    camTargetH = camH; camTargetV = camV;
+  }
+  prevMousePos = { x: e.clientX, y: e.clientY };
+});
+
+window.addEventListener('mouseup', e => {
+  isDragging = false;
+  container.classList.remove('grabbing');
+
+  // Click detection (short press = click, not drag)
+  const elapsed = performance.now() - mouseDownTime;
+  if (elapsed < 250) {
+    handleClick(e);
+  }
+});
+
+renderer.domElement.addEventListener('wheel', e => {
+  if (isZoomedOnSat) {
+    camTargetDist = Math.max(1.5, Math.min(10, camTargetDist + e.deltaY * 0.005));
+  } else {
+    camDist = Math.max(4, Math.min(40, camDist + e.deltaY * 0.01));
+    camTargetDist = camDist;
+  }
+  e.preventDefault();
+}, { passive: false });
+
+// Touch support
+let touchStart = null;
+renderer.domElement.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY, time: performance.now() };
+});
+renderer.domElement.addEventListener('touchmove', e => {
+  if (!touchStart || e.touches.length !== 1) return;
+  if (!isZoomedOnSat) {
+    camH += (e.touches[0].clientX - touchStart.x) * 0.005;
+    camV = Math.max(-1.2, Math.min(1.2, camV + (e.touches[0].clientY - touchStart.y) * 0.005));
+    camTargetH = camH; camTargetV = camV;
+  }
+  touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY, time: touchStart.time };
+  e.preventDefault();
+}, { passive: false });
+renderer.domElement.addEventListener('touchend', e => {
+  if (touchStart && (performance.now() - touchStart.time) < 300) {
+    // Simulate click at touch position
+    handleClick({ clientX: touchStart.x, clientY: touchStart.y });
+  }
+  touchStart = null;
+});
+
+// ==================== CLICK HANDLER (RAYCASTING) ====================
+function handleClick(e) {
+  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+
+  // Collect all satellite hit spheres
+  const hitTargets = [];
+  allSatDots.forEach(dot => {
+    dot.children.forEach(child => {
+      if (child.userData.isSatHitbox) {
+        hitTargets.push(child);
+      }
+    });
+  });
+
+  const intersects = raycaster.intersectObjects(hitTargets, false);
+  if (intersects.length > 0) {
+    const hit = intersects[0].object;
+    const satDot = hit.userData.satDot;
+    zoomToSatellite(satDot);
+  }
+}
+
+// ==================== PHYSICS COMPUTATIONS ====================
+function computeBounce(a0) {
+  const a = a0 * Math.PI / 180;
+  return 1.3802 - 0.3198 * (Math.sin(a) + Math.sin(a) * Math.sin(a));
+}
+
+function computePSD(L, E, a0, Kp) {
+  const baseFlux = 1e6 * Math.exp(-E / 0.5) * Math.exp(-((L - 4.5) ** 2) / 4);
+  const stormFactor = 1 + Kp * 0.5;
+  const pitchFactor = Math.sin(a0 * Math.PI / 180) ** 2;
+  return baseFlux * stormFactor * pitchFactor * 1e-16;
+}
+
+function computeFlux(psd, E) { return psd * E * (E + 2 * 0.511) * 1e6; }
+function computeLmp(Dst, Vsw) { return 11.4 + 0.013 * (-5) - 0.000015 * Math.abs(Dst); }
+function computeBLC(L) { return Math.asin(Math.sqrt(1 / (L ** 3))) * 180 / Math.PI; }
+function computeDLC(L) { return computeBLC(L) * 1.6; }
+
+function updateStormIndicator() {
+  const el = document.getElementById('storm-indicator');
+  const label = document.getElementById('storm-label');
+  const kp = currentKpValue;
+  el.classList.remove('quiet', 'moderate', 'intense');
+  if (kp <= 3) { el.classList.add('quiet'); label.textContent = 'Quiet Conditions'; }
+  else if (kp <= 6) { el.classList.add('moderate'); label.textContent = 'Moderate Storm (G' + Math.min(3, Math.round(kp) - 3) + ')'; }
+  else { el.classList.add('intense'); label.textContent = 'Intense Storm (G' + Math.min(5, Math.round(kp) - 3) + ')'; }
+}
+
+function updateComputedValues() {
+  const T = computeBounce(state.alpha);
+  const kpNow = currentKpValue;
+  const psd = computePSD(state.lstar, state.energy, state.alpha, kpNow);
+  const flux = computeFlux(psd, state.energy);
+  const Lmp = computeLmp(state.dst, state.vsw);
+  const lcds = Lmp * 0.76;
+  const blc = computeBLC(state.lstar);
+  const dlc = computeDLC(state.lstar);
+  const dllLog = computeDLL_Kp(kpNow, state.lstar);
+  const dllVal = Math.pow(10, dllLog);
+
+  document.getElementById('bounce-val').textContent = T.toFixed(4);
+  document.getElementById('psd-val').textContent = psd.toExponential(2);
+  document.getElementById('flux-val').textContent = flux.toExponential(2);
+  document.getElementById('dll-live').textContent = dllVal.toExponential(2);
+  document.getElementById('dll-val').innerHTML = dllVal.toExponential(1) + ' ⟲';
+  document.getElementById('kp-current-val').textContent = kpNow.toFixed(1);
+  document.getElementById('lmp-val').innerHTML = Lmp.toFixed(1) + ' R<sub>E</sub>';
+  document.getElementById('lcds-val').innerHTML = lcds.toFixed(1) + ' R<sub>E</sub>';
+  document.getElementById('blc-val').textContent = blc.toFixed(1) + '°';
+  document.getElementById('dlc-val').textContent = dlc.toFixed(1) + '°';
+
+  const statusEl = document.getElementById('trap-status');
+  if (state.alpha < blc) { statusEl.textContent = 'BLC (Precipitating)'; statusEl.className = 'val danger'; }
+  else if (state.alpha < dlc) { statusEl.textContent = 'Drift Loss Cone'; statusEl.className = 'val warn'; }
+  else { statusEl.textContent = 'Stably Trapped'; statusEl.className = 'val safe'; }
+
+  const fluxEl = document.getElementById('flux-val');
+  if (flux > 1e6) fluxEl.className = 'val danger';
+  else if (flux > 1e4) fluxEl.className = 'val warn';
+  else fluxEl.className = 'val';
+
+  document.getElementById('bot-lstar').innerHTML = state.lstar.toFixed(1) + ' R<sub>E</sub>';
+  document.getElementById('bot-energy').textContent = state.energy.toFixed(1) + ' MeV';
+  document.getElementById('bot-alpha').textContent = state.alpha + '°';
+  document.getElementById('bot-kp').textContent = kpNow.toFixed(1);
+  document.getElementById('bot-dll').textContent = dllVal.toExponential(1);
+  document.getElementById('bot-model').textContent = state.mixedTerms ? 'Eq.3' : 'Eq.2';
+  document.getElementById('bot-simtime').textContent = 'T+' + simTimeHours.toFixed(1) + 'h';
+  document.getElementById('sim-time-display').textContent = 'T+' + simTimeHours.toFixed(1) + 'h';
+
+  updateStormIndicator();
+
+  // Store for future VR panel
+  computedValues = { bounceFactor: T, psd, flux, lmp: Lmp, lcds, blc, dlc, dllVal, status:
+    state.alpha < blc ? 'BLC (Precipitating)' : state.alpha < dlc ? 'Drift Loss Cone' : 'Stably Trapped'
+  };
+}
+
+// ==================== SLIDER BINDINGS ====================
+function bindSlider(id, key, dispId, fmt) {
+  document.getElementById(id).addEventListener('input', function() {
+    state[key] = parseFloat(this.value);
+    document.getElementById(dispId).textContent = fmt ? fmt(state[key]) : state[key];
+    onStateChange();
+  });
+}
+
+bindSlider('lstar', 'lstar', 'lstar-val');
+bindSlider('energy', 'energy', 'energy-val', v => v.toFixed(1));
+bindSlider('alpha', 'alpha', 'alpha-val');
+bindSlider('dpp', 'dpp', 'dpp-val', v => Math.pow(10, v).toExponential(1));
+bindSlider('daa', 'daa', 'daa-val', v => Math.pow(10, v).toExponential(1));
+bindSlider('dap', 'dap', 'dap-val', v => state.mixedTerms ? Math.pow(10, v).toExponential(1) : '0 (off)');
+bindSlider('tau', 'tau', 'tau-val', v => v.toFixed(1));
+bindSlider('dst', 'dst', 'dst-val');
+bindSlider('vsw', 'vsw', 'vsw-val');
+
+// Kp baseline drives timeline regeneration
+document.getElementById('kp').addEventListener('input', function() {
+  state.kp = parseFloat(this.value);
+  document.getElementById('kp-val').textContent = state.kp;
+  kpTimeline = generateKpTimeline(state.kp);
+  renderKpTimeline();
+  onStateChange();
+});
+
+document.getElementById('sim-speed').addEventListener('input', function() {
+  simSpeed = parseFloat(this.value);
+  document.getElementById('sim-speed-val').textContent = simSpeed;
+});
+
+// Toggle bindings
+document.getElementById('show-belts').addEventListener('change', e => { state.showBelts = e.target.checked; onStateChange(); });
+document.getElementById('show-orbits').addEventListener('change', e => { state.showOrbits = e.target.checked; onStateChange(); });
+document.getElementById('show-field').addEventListener('change', e => { state.showField = e.target.checked; onStateChange(); });
+document.getElementById('show-particles').addEventListener('change', e => { state.showParticles = e.target.checked; onStateChange(); });
+document.getElementById('show-loss-cone').addEventListener('change', e => { state.showLossCone = e.target.checked; onStateChange(); });
+document.getElementById('sim-running').addEventListener('change', e => { simRunning = e.target.checked; });
+document.getElementById('mixed-terms').addEventListener('change', e => {
+  state.mixedTerms = e.target.checked;
+  document.getElementById('dap').disabled = !e.target.checked;
+  document.getElementById('dap-val').textContent = e.target.checked ? Math.pow(10, state.dap).toExponential(1) : '0 (off)';
+  onStateChange();
+});
+
+function onStateChange() {
+  buildBelts();
+  buildLshell();
+  buildLossCone();
+  updateComputedValues();
+  beltGroup.visible = state.showBelts;
+  orbitGroup.visible = state.showOrbits;
+  fieldGroup.visible = state.showField;
+  particleGroup.visible = state.showParticles;
+  lossConeGroup.visible = state.showLossCone;
+}
+
+// ==================== PRESETS ====================
+function applyPreset(name, btn) {
+  document.querySelectorAll('.btn-group .btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+
+  const presets = {
+    quiet:    { kp: 1, dst: -10, vsw: 350, dpp: -8, daa: -6, tau: 20 },
+    moderate: { kp: 4, dst: -80, vsw: 500, dpp: -6.5, daa: -4.5, tau: 8 },
+    intense:  { kp: 8, dst: -250, vsw: 800, dpp: -5, daa: -3, tau: 2 },
+    recovery: { kp: 2, dst: -40, vsw: 400, dpp: -7.5, daa: -5.5, tau: 15 }
+  };
+
+  const p = presets[name];
+  Object.entries(p).forEach(([k, v]) => {
+    state[k] = v;
+    const el = document.getElementById(k);
+    if (el) el.value = v;
+  });
+
+  kpTimeline = generateKpTimeline(state.kp);
+  renderKpTimeline();
+
+  document.getElementById('kp-val').textContent = state.kp;
+  document.getElementById('dst-val').textContent = state.dst;
+  document.getElementById('vsw-val').textContent = state.vsw;
+  document.getElementById('dpp-val').textContent = Math.pow(10, state.dpp).toExponential(1);
+  document.getElementById('daa-val').textContent = Math.pow(10, state.daa).toExponential(1);
+  document.getElementById('tau-val').textContent = state.tau.toFixed(1);
+
+  onStateChange();
+}
+
+// ==================== TABS ====================
+// ==================== POPUP HUD SYSTEM ====================
+const popupContent = {
+  // Computed Values
+  bounce: {
+    title: 'T(α₀) — Bounce Factor',
+    tech: 'The normalized bounce period from the Schulz & Lanzerotti (1974) approximation. It describes how long it takes a trapped particle to travel from one magnetic mirror point to the other and back.',
+    layman: 'Imagine a ball bouncing between two walls — that\'s what trapped particles do along magnetic field lines. They spiral toward the north pole, bounce back, spiral to the south pole, and bounce again. This number tells you how fast that back-and-forth happens. A value near 1.38 means the particle barely penetrates before bouncing back; a value near 0.74 means it\'s diving deep toward the poles on each bounce.'
+  },
+  psd: {
+    title: 'Phase Space Density (f)',
+    tech: 'The fundamental quantity in radiation belt physics: the number of particles per unit volume in six-dimensional phase space (position + momentum). PSD is conserved along particle trajectories when no diffusion occurs.',
+    layman: 'Think of this as the "concentration" of dangerous high-energy particles at a specific location and energy. Higher phase space density means more particles packed into that region. Scientists track how this concentration changes over time and space to understand whether particles are being added (by storms) or removed (by the atmosphere). It\'s the master variable for predicting radiation hazards to satellites.'
+  },
+  flux: {
+    title: 'Differential Flux (j)',
+    tech: 'The number of particles per unit area, per second, per solid angle, per unit energy — measured in cm⁻²s⁻¹sr⁻¹MeV⁻¹. This is what particle detectors on spacecraft actually measure.',
+    layman: 'This is the "radiation dose rate" that a satellite or astronaut actually experiences. It counts how many high-energy particles are hitting a given area per second. Green values are safe, amber means elevated radiation, and red means a serious radiation storm that can damage satellite electronics, degrade solar panels, and pose health risks to astronauts. Spacecraft operators watch this number closely during storms.'
+  },
+  dll: {
+    title: 'D_L*L* — Radial Diffusion Coefficient',
+    tech: 'The Brautigam & Albert (2000) parameterization of electromagnetic radial diffusion, driven by ULF wave power. It scales as L*¹⁰ and increases exponentially with Kp, spanning 4+ orders of magnitude between quiet and storm conditions.',
+    layman: 'This number controls how fast particles get pushed inward or outward through the radiation belts by magnetic waves. During quiet times, the belts are stable — particles stay put. During storms, this value skyrockets (sometimes by 10,000×), and particles get shoved deep into the inner belt, gaining enormous energy in the process. That\'s how storms create the dangerous radiation surges that threaten satellites.'
+  },
+  kp: {
+    title: 'Kp(t) — Planetary K-index',
+    tech: 'A logarithmic index (0-9) of global geomagnetic disturbance, derived from ground magnetometer measurements and updated every 3 hours. Kp drives the time-dependent D_LL parameterization in this simulation.',
+    layman: 'Kp is the "storm meter" for Earth\'s magnetic field. It runs from 0 (dead calm) to 9 (extreme storm). At Kp 0-2, things are quiet and the belts are stable. At Kp 5+, a geomagnetic storm is underway — the belts are being pumped with energy, satellites are at risk, and aurora may be visible at unusually low latitudes. In this simulation, Kp changes every 3 hours, just like in real life.'
+  },
+  lmp: {
+    title: 'Magnetopause Standoff Distance (L_mp)',
+    tech: 'The distance from Earth\'s center to the sunward magnetopause, computed from the Shue et al. (1998) model using Dst and solar wind dynamic pressure. Represents the boundary where solar wind pressure balances Earth\'s magnetic pressure.',
+    layman: 'Earth\'s magnetic field creates a protective bubble called the magnetosphere. The magnetopause is the outer wall of that bubble, where it meets the solar wind. This number tells you how far that wall is from Earth. Normally it\'s about 10 Earth radii out. During intense storms, the solar wind compresses it inward — sometimes to 6 Earth radii or less — which strips away the outer radiation belt and exposes geostationary satellites to the raw solar wind.'
+  },
+  lcds: {
+    title: 'Last Closed Drift Shell',
+    tech: 'The outermost L-shell on which particles can complete a full azimuthal drift around Earth without encountering the magnetopause. Beyond this shell, particles are lost to magnetopause shadowing.',
+    layman: 'Particles in the radiation belt need to drift all the way around the Earth to stay trapped. But if they\'re too far out, they bump into the magnetopause wall and escape into space. The Last Closed Drift Shell is the boundary — particles inside it stay trapped, particles outside it are lost. During storms, this boundary moves inward, effectively "peeling away" the outer edge of the radiation belt.'
+  },
+  blc: {
+    title: 'Bounce Loss Cone (α_BLC)',
+    tech: 'The equatorial pitch angle below which a particle mirrors at an altitude low enough to collide with the atmosphere and be lost. Derived from dipole geometry: α_BLC = arcsin(√(1/L³)).',
+    layman: 'Particles in the belt spiral along field lines and bounce between the poles. But if a particle\'s angle is too steep — if it dives too deep toward Earth — it will hit the atmosphere and be destroyed. The Bounce Loss Cone is the critical angle: particles with shallower angles than this are safe and stay trapped. Particles with steeper angles crash into the atmosphere within one bounce. This is one of the main ways the radiation belts lose particles.'
+  },
+  dlc: {
+    title: 'Drift Loss Cone (α_DLC)',
+    tech: 'Slightly larger than the BLC, the DLC accounts for asymmetry in Earth\'s magnetic field. Particles in the DLC may survive one bounce but will be lost when they drift to a longitude where the field dips lower (e.g., the South Atlantic Anomaly).',
+    layman: 'Earth\'s magnetic field isn\'t perfectly symmetric — it\'s weaker over the South Atlantic (the South Atlantic Anomaly). Some particles survive their north-south bounce at one longitude but, as they slowly drift around the Earth, they reach the weak spot and plunge into the atmosphere. The Drift Loss Cone captures these particles that are "dead men walking" — trapped for now, but doomed within one full trip around the planet.'
+  },
+  trapstatus: {
+    title: 'Particle Status',
+    tech: 'Classification based on the current pitch angle relative to the bounce and drift loss cones. "Stably Trapped" particles remain in the belt indefinitely; "DLC" particles will be lost within one drift period; "BLC" particles are precipitating into the atmosphere.',
+    layman: 'This tells you the fate of a particle at the current settings. "Stably Trapped" means it\'s safely bouncing inside the belt — it could survive there for days or months. "Drift Loss Cone" means it\'s living on borrowed time and will be lost within a few hours as it drifts around Earth. "BLC (Precipitating)" means it\'s on a collision course with the atmosphere right now — it will be gone within seconds, producing aurora or adding to the radiation dose at aircraft altitudes.'
+  },
+  // Equations
+  eq1: {
+    title: 'Eq.1 — Generalized Diffusion Equation',
+    tech: 'This is the master equation. Phase space density f evolves via diffusion in the three adiabatic invariants (J₁, J₂, J₃), corresponding to the three periodic motions of trapped particles.',
+    layman: 'This is the "big picture" equation that governs everything in the radiation belts. It says: the concentration of trapped particles at any point changes over time because particles are constantly being jostled around by electromagnetic waves. Those waves push particles in three different ways — they change their spin speed, their bounce pattern, and their orbit around Earth. This one equation captures all three effects. Every other equation in this tool is a more detailed version of this one.'
+  },
+  eq2: {
+    title: 'Eq.2 — Fokker-Planck (no mixed terms)',
+    tech: 'The standard three-term Fokker-Planck equation separating radial diffusion (D_L*L*), momentum diffusion (D_pp), and pitch-angle diffusion (D_αα) as independent processes.',
+    layman: 'This breaks the big picture equation into three separate mechanisms. First: particles get pushed inward or outward by ULF waves (radial diffusion) — this is what makes the belts expand during storms. Second: particles gain or lose energy from whistler waves (momentum diffusion) — this is how storms create killer electrons. Third: particles get their bounce angle changed by plasma waves (pitch-angle diffusion) — this is how particles get knocked into the atmosphere. The minus f/τ at the end represents all the ways particles are lost.'
+  },
+  eq3: {
+    title: 'Eq.3 — Fokker-Planck with Mixed Terms',
+    tech: 'Adds cross-diffusion D_α₀p coupling energy and pitch-angle changes. This captures processes where a single wave interaction simultaneously changes both a particle\'s energy and its bounce angle.',
+    layman: 'This is the more complete (and more realistic) version. In the real magnetosphere, when a wave hits a particle, it often changes the particle\'s energy AND its bounce angle at the same time — you can\'t always separate those effects. The "mixed term" D_α₀p captures this coupling. It matters most during strong storm conditions when wave amplitudes are large. Including it gives more accurate predictions of how fast particles are accelerated and lost.'
+  },
+  eq4: {
+    title: 'T(α₀) — Bounce Period Factor',
+    tech: 'The Schulz & Lanzerotti (1974) approximation for the normalized bounce integral. Determines how the bounce period varies with equatorial pitch angle in a dipole field.',
+    layman: 'This simple formula tells you how long it takes a particle to make one complete bounce between the north and south magnetic poles. Particles that bounce steeply (small pitch angle) barely penetrate past the equator and bounce back quickly — they have T close to 1.38. Particles that bounce gently (pitch angle near 90°) travel far toward the poles before bouncing — they take longer, with T close to 0.74. This matters because the bounce time affects how strongly waves can interact with the particles.'
+  },
+  eq5: {
+    title: 'D_L*L*(Kp) — Brautigam & Albert 2000',
+    tech: 'Empirical parameterization derived from 18 days of ground magnetometer data and CRRES measurements. D_LL scales as 10^(0.506·Kp) × L*¹⁰, producing dramatic enhancement at high L and high Kp.',
+    layman: 'This is the formula that makes the simulation come alive during storms. It says: the rate of particle transport depends on two things — how far from Earth you are (L*) and how stormy conditions are (Kp). The L*¹⁰ means diffusion is vastly stronger at the outer edge of the belts than near Earth. The Kp term means that going from quiet (Kp=1) to storm (Kp=8) increases diffusion by roughly 10,000 times. That\'s why storms can reshape the entire radiation belt structure in just hours.'
+  }
+};
+
+function showPopup(key) {
+  const content = popupContent[key];
+  if (!content) return;
+
+  // Remove existing popup if any
+  const existing = document.querySelector('.popup-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'popup-overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  const card = document.createElement('div');
+  card.className = 'popup-card';
+  card.innerHTML = `
+    <h4>${content.title}</h4>
+    <p>${content.tech}</p>
+    <div class="layman"><strong>In plain English:</strong> ${content.layman}</div>
+    <button class="close-btn" onclick="this.closest('.popup-overlay').remove()">Got it</button>
+  `;
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+}
+
+function showTab(id, btn) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+
+// ==================== ANIMATION ====================
+const clock = new THREE.Clock();
+let prevKpIndex = -1;
+
+function animate() {
+  // Note: When in VR, renderer.setAnimationLoop handles the loop.
+  // When not in VR, we use requestAnimationFrame as fallback.
+  const dt = clock.getDelta();
+  const time = clock.getElapsedTime();
+
+  // One-time log when first VR frame renders
+  if (isInVR && !animate._vrLogged) {
+    animate._vrLogged = true;
+    console.log('FIRST VR FRAME. Dolly pos:', vrDolly.position.toArray().map(v=>v.toFixed(2)).join(','));
+    console.log('Scene children:', scene.children.length, '| XR isPresenting:', renderer.xr.isPresenting);
+    console.log('Controllers in dolly: c0=', controller0.parent === vrDolly, 'c1=', controller1.parent === vrDolly);
+    console.log('PanelLeft pos:', vrPanelLeft.mesh.position.toArray().map(v=>v.toFixed(1)).join(','), 'vis:', vrPanelLeft.mesh.visible);
+    console.log('PanelCenter pos:', vrPanelCenter.mesh.position.toArray().map(v=>v.toFixed(1)).join(','));
+    console.log('PanelRight pos:', vrPanelRight.mesh.position.toArray().map(v=>v.toFixed(1)).join(','));
+    console.log('Toggle sphere pos:', vrHudToggle.position.toArray().map(v=>v.toFixed(1)).join(','));
+    console.log('OrbitGroup children:', orbitGroup.children.length);
+    // Count satellites
+    let satCount = 0;
+    orbitGroup.children.forEach(o => o.children.forEach(c => { if (c.userData && c.userData.satName) satCount++; }));
+    console.log('Satellite meshes with satName:', satCount);
+  }
+  if (!isInVR) animate._vrLogged = false;
+
+  // ---- Kp TIME SIMULATION ----
+  if (simRunning) {
+    // dt is real seconds; simSpeed converts to sim-hours
+    simTimeHours += dt * simSpeed / 3600 * 60; // simSpeed=60 → 1 real sec = 1 sim minute
+    if (simTimeHours >= 24) {
+      simTimeHours -= 24;
+      kpTimeline = generateKpTimeline(state.kp); // regenerate each 24h cycle
+    }
+
+    // Determine current 3-hour bin
+    currentKpIndex = Math.min(7, Math.floor(simTimeHours / 3));
+    const nextIndex = Math.min(7, currentKpIndex + 1);
+    const fracInBin = (simTimeHours / 3) - currentKpIndex;
+
+    // Smooth interpolation between Kp bins
+    currentKpValue = kpTimeline[currentKpIndex] * (1 - fracInBin) + kpTimeline[nextIndex === 8 ? 0 : nextIndex] * fracInBin;
+
+    // Update DLL from Kp
+    currentDLL = computeDLL_Kp(currentKpValue, state.lstar);
+
+    // Rebuild belts periodically when Kp bin changes
+    if (currentKpIndex !== prevKpIndex) {
+      prevKpIndex = currentKpIndex;
+      renderKpTimeline();
+      buildBelts();
+    }
+
+    // Continuously update computed values
+    updateComputedValues();
+  }
+
+  // ---- MAGNETIC OSCILLATION ----
+  // Driven by currentKpValue: belts oscillate, field lines sway
+  const kpNorm = currentKpValue / 9;
+  const magOscFreq = 0.3 + kpNorm * 0.8; // faster oscillation during storms
+  const magOscAmp = 0.01 + kpNorm * 0.04; // larger amplitude during storms
+
+  // Belt breathing driven by magnetic oscillation
+  if (beltGroup.children.length > 0) {
+    const osc = 1 + magOscAmp * Math.sin(time * magOscFreq * Math.PI * 2);
+    const vertOsc = 1 + magOscAmp * 0.5 * Math.sin(time * magOscFreq * 1.3 * Math.PI * 2 + 0.5);
+    beltGroup.children.forEach((c, i) => {
+      const phase = i * 0.3;
+      const localOsc = osc + 0.005 * Math.sin(time * 1.1 + phase);
+      c.scale.x = localOsc;
+      c.scale.z = localOsc;
+      c.scale.y = c.scale.y * 0.97 + (c.scale.y * vertOsc) * 0.03; // smooth vertical
+    });
+  }
+
+  // Field line sway (subtle tilt during storms)
+  if (fieldGroup.visible) {
+    const tilt = kpNorm * 0.03 * Math.sin(time * magOscFreq * Math.PI);
+    fieldGroup.rotation.x = tilt;
+    fieldGroup.rotation.z = tilt * 0.5 * Math.sin(time * 0.2);
+  }
+
+  // ---- VR INTERACTION ----
+  updateVRInteraction(dt);
+
+  // ---- CAMERA ----
+  // In VR, the headset controls the camera — skip all desktop camera logic
+  if (!isInVR) {
+  if (isZoomedOnSat && trackingSatellite) {
+    // Get world position of tracked satellite
+    const worldPos = new THREE.Vector3();
+    trackingSatellite.getWorldPosition(worldPos);
+    camTargetLookAt.copy(worldPos);
+
+    // Position camera offset from satellite
+    const offset = worldPos.clone().normalize().multiplyScalar(camTargetDist);
+    offset.y += camTargetDist * 0.3;
+    const targetCamPos = worldPos.clone().add(offset);
+
+    camera.position.lerp(targetCamPos, CAM_LERP * 2);
+    camLookAt.lerp(camTargetLookAt, CAM_LERP * 2);
+    camera.lookAt(camLookAt);
+
+    // Update tooltip position
+    const screenPos = worldPos.clone().project(camera);
+    const tooltip = document.getElementById('sat-tooltip');
+    const sx = (screenPos.x * 0.5 + 0.5) * window.innerWidth;
+    const sy = (-screenPos.y * 0.5 + 0.5) * window.innerHeight;
+    tooltip.style.left = Math.min(sx + 30, window.innerWidth - 250) + 'px';
+    tooltip.style.top = Math.max(sy - 60, 70) + 'px';
+  } else {
+    if (!isDragging) camH += 0.0008;
+    camTargetH = camH; camTargetV = camV;
+    const targetPos = new THREE.Vector3(
+      camTargetDist * Math.cos(camV) * Math.cos(camH),
+      camTargetDist * Math.sin(camV),
+      camTargetDist * Math.cos(camV) * Math.sin(camH)
+    );
+    camera.position.lerp(targetPos, 0.08);
+    camLookAt.lerp(camTargetLookAt, 0.08);
+    camera.lookAt(camLookAt);
+    camDist += (camTargetDist - camDist) * 0.08;
+  }
+  } // end !isInVR
+
+  // ---- EARTH ROTATION ----
+  earth.rotation.y += 0.0015;
+
+  // ---- SATELLITE MOTION ----
+  orbitGroup.children.forEach(orbit => {
+    orbit.children.forEach(child => {
+      if (child.userData.orbitRadius) {
+        child.userData.phase += child.userData.speed * dt;
+        const ph = child.userData.phase;
+        const ecc = child.userData.eccentricity;
+        const r = child.userData.orbitRadius * (1 - ecc * ecc) / (1 + ecc * Math.cos(ph));
+        const inc = child.userData.inclination * Math.PI / 180;
+        child.position.set(r * Math.cos(ph), r * Math.sin(ph) * Math.sin(inc), r * Math.sin(ph) * Math.cos(inc));
+
+        // Billboard the ring
+        if (child.userData.ring) child.userData.ring.lookAt(camera.position);
+      }
+    });
+  });
+
+  // ---- PARTICLE ANIMATION ----
+  if (state.showParticles && particleGroup.children.length > 0) {
+    const pos = particleGroup.children[0].geometry.attributes.position.array;
+    const colors = particleGroup.children[0].geometry.attributes.color.array;
+    const stormBoost = 1 + currentKpValue * 0.12;
+    const radialPush = kpNorm * 0.002; // storm drives radial transport
+
+    for (let i = 0; i < NUM_PARTICLES; i++) {
+      const p = pMeta[i];
+      p.phi += p.driftSpeed * dt * stormBoost;
+      p.bouncePhase += p.bounceSpeed * dt * (1 + kpNorm * 0.3);
+      p.gyroPhase += 5.0 * dt;
+
+      // Magnetic oscillation affects particle L-shell slightly
+      p.L += radialPush * Math.sin(time * magOscFreq * Math.PI * 2 + p.phi) * dt;
+      p.L = Math.max(1.2, Math.min(8.5, p.L));
+
+      const r = p.L * Math.sin(Math.PI / 2 + p.theta) ** 2;
+      const bounce = Math.sin(p.bouncePhase) * 0.4 * (1 / p.L);
+      const g = p.gyroRadius;
+      const idx = i * 3;
+      pos[idx] = (r + g * Math.cos(p.gyroPhase)) * Math.cos(p.phi);
+      pos[idx + 1] = bounce + g * Math.sin(p.gyroPhase) * 0.3;
+      pos[idx + 2] = (r + g * Math.cos(p.gyroPhase)) * Math.sin(p.phi);
+
+      // Color shift during storms: particles near injection get brighter
+      if (kpNorm > 0.4) {
+        const injection = Math.max(0, 1 - Math.abs(p.L - 4.5) / 2) * kpNorm;
+        colors[idx] = Math.min(1, 0.15 + (p.L - 1.5) / 6 * 0.85 + injection * 0.3);
+        colors[idx + 1] = Math.max(0.1, 0.8 - (p.L - 1.5) / 6 * 0.55 - injection * 0.2);
+      }
+    }
+    particleGroup.children[0].geometry.attributes.position.needsUpdate = true;
+    particleGroup.children[0].geometry.attributes.color.needsUpdate = true;
+  }
+
+  // ── PANORAMIC RENDERING FOR IGLOO ──
+  if (panoMode && cubeCamera) {
+    try {
+      renderPanorama();
+      extractPanoToCanvas();
+      if (panoStreaming) updatePanoWindow();
+      if (window._updatePanoPreview) window._updatePanoPreview();
+    } catch(e) {
+      if (!animate._panoError) {
+        console.error('Panoramic render error:', e.message);
+        animate._panoError = true;
+      }
+    }
+  }
+
+  renderer.render(scene, camera);
+}
+
+// ==================== RESIZE ====================
+window.addEventListener('resize', () => {
+  if (isInVR) return; // Don't resize while in VR
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ==================== PANORAMIC RENDERING FOR IGLOO ====================
+// Renders the scene to a CubeCamera, then converts the cubemap to an
+// equirectangular panorama via a GPU shader. The panoramic image (2:1 aspect)
+// is output to a dedicated window that IGLOO Core Engine captures as an
+// NDI source or via screen capture.
+//
+// Resolution options:
+//   2000×1000, 4000×2000, 6000×3000, 8000×4000
+// The IGLOO system reprojects the equirectangular panorama onto its surfaces.
+
+let panoMode = false;
+let cubeCamera = null;
+let cubeRenderTarget = null;
+let panoRenderTarget = null;
+let panoScene = null;
+let panoCamera = null;
+let panoMaterial = null;
+let panoCanvas = null;
+let panoCtx = null;
+let panoStreaming = false;
+let panoWindow = null;
+let panoFaceSize = 1024; // cubemap face resolution
+let panoWidth = 4000;
+let panoHeight = 2000;
+
+const PANO_RESOLUTIONS = [
+  { label: '2000 × 1000 (Light)', w: 2000, h: 1000, face: 512 },
+  { label: '4000 × 2000 (Standard)', w: 4000, h: 2000, face: 1024 },
+  { label: '6000 × 3000 (High)', w: 6000, h: 3000, face: 1536 },
+  { label: '8000 × 4000 (Ultra)', w: 8000, h: 4000, face: 2048 },
+];
+
+// ── GPU Shader: Cubemap → Equirectangular ─────────────────────────
+// Renders a fullscreen quad that samples the cubemap using equirectangular UV mapping
+const equirectVertexShader = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = vec4(position, 1.0);
+  }
+`;
+
+const equirectFragmentShader = `
+  uniform samplerCube tCube;
+  varying vec2 vUv;
+  
+  #define PI 3.14159265359
+  
+  void main() {
+    // Convert UV (0-1) to equirectangular angles
+    float longitude = vUv.x * 2.0 * PI - PI;  // -π to π
+    float latitude = vUv.y * PI - PI * 0.5;     // -π/2 to π/2
+    
+    // Convert angles to 3D direction vector
+    vec3 dir;
+    dir.x = cos(latitude) * sin(longitude);
+    dir.y = sin(latitude);
+    dir.z = cos(latitude) * cos(longitude);
+    
+    gl_FragColor = textureCube(tCube, dir);
+  }
+`;
+
+function initPanoMode(resIdx) {
+  const res = PANO_RESOLUTIONS[resIdx || 1];
+  panoFaceSize = res.face;
+  panoWidth = res.w;
+  panoHeight = res.h;
+
+  // Create/recreate cubemap render target
+  if (cubeRenderTarget) cubeRenderTarget.dispose();
+  cubeRenderTarget = new THREE.WebGLCubeRenderTarget(panoFaceSize, {
+    format: THREE.RGBAFormat,
+    generateMipmaps: false,
+  });
+
+  if (!cubeCamera) {
+    cubeCamera = new THREE.CubeCamera(0.1, 200, cubeRenderTarget);
+    scene.add(cubeCamera);
+  } else {
+    cubeCamera.renderTarget = cubeRenderTarget;
+  }
+
+  // Create equirectangular render target
+  if (panoRenderTarget) panoRenderTarget.dispose();
+  panoRenderTarget = new THREE.WebGLRenderTarget(panoWidth, panoHeight, {
+    format: THREE.RGBAFormat,
+    generateMipmaps: false,
+  });
+
+  // Create the shader material that converts cubemap → equirectangular
+  panoMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      tCube: { value: null },
+    },
+    vertexShader: equirectVertexShader,
+    fragmentShader: equirectFragmentShader,
+    depthWrite: false,
+    depthTest: false,
+  });
+
+  // Fullscreen quad scene for the equirectangular pass
+  panoScene = new THREE.Scene();
+  panoCamera = new THREE.Camera(); // identity camera for fullscreen quad
+  const quadGeo = new THREE.PlaneGeometry(2, 2);
+  panoScene.add(new THREE.Mesh(quadGeo, panoMaterial));
+
+  // Canvas for reading pixels back to CPU (for the output window)
+  if (!panoCanvas) {
+    panoCanvas = document.createElement('canvas');
+    panoCtx = panoCanvas.getContext('2d');
+  }
+  panoCanvas.width = panoWidth;
+  panoCanvas.height = panoHeight;
+
+  console.log(`Panoramic rendering initialized: ${panoWidth}×${panoHeight} (cubemap face: ${panoFaceSize}²)`);
+}
+
+function renderPanorama() {
+  if (!cubeCamera || !panoRenderTarget || !panoMaterial) return;
+
+  // Step 1: Render cubemap from camera position
+  cubeCamera.position.copy(camera.position);
+  cubeCamera.update(renderer, scene);
+
+  // Step 2: Render equirectangular projection via shader
+  panoMaterial.uniforms.tCube.value = cubeRenderTarget.texture;
+
+  const currentRenderTarget = renderer.getRenderTarget();
+  renderer.setRenderTarget(panoRenderTarget);
+  renderer.render(panoScene, panoCamera);
+  renderer.setRenderTarget(currentRenderTarget);
+}
+
+function extractPanoToCanvas() {
+  if (!panoRenderTarget || !panoCanvas) return;
+
+  // Read pixels from the equirectangular render target
+  const gl = renderer.getContext();
+  const fb = renderer.properties.get(panoRenderTarget).__webglFramebuffer;
+  if (!fb) return;
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  const pixels = new Uint8Array(panoWidth * panoHeight * 4);
+  gl.readPixels(0, 0, panoWidth, panoHeight, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  // Write to canvas (flip Y)
+  const imageData = panoCtx.createImageData(panoWidth, panoHeight);
+  for (let y = 0; y < panoHeight; y++) {
+    const srcRow = (panoHeight - 1 - y) * panoWidth * 4;
+    const dstRow = y * panoWidth * 4;
+    imageData.data.set(pixels.subarray(srcRow, srcRow + panoWidth * 4), dstRow);
+  }
+  panoCtx.putImageData(imageData, 0, 0);
+}
+
+function openPanoWindow() {
+  if (panoWindow && !panoWindow.closed) { panoWindow.focus(); return; }
+
+  const w = Math.min(panoWidth, screen.width - 50);
+  const h = Math.min(panoHeight, Math.floor(w / 2));
+  panoWindow = window.open('', 'BeltinatorPano',
+    `width=${w},height=${h},menubar=no,toolbar=no,location=no,status=no`);
+
+  if (!panoWindow) {
+    console.error('Popup blocked! Allow popups for this site.');
+    alert('Please allow popups for this site to open the panoramic output window.');
+    return;
+  }
+
+  panoWindow.document.title = 'Beltinator Panoramic Output';
+  panoWindow.document.body.style.cssText = 'margin:0;padding:0;background:#000;overflow:hidden;';
+
+  const popupCanvas = panoWindow.document.createElement('canvas');
+  popupCanvas.id = 'pano-output';
+  popupCanvas.width = panoWidth;
+  popupCanvas.height = panoHeight;
+  popupCanvas.style.cssText = 'width:100%;height:100%;object-fit:contain;';
+  panoWindow.document.body.appendChild(popupCanvas);
+
+  const label = panoWindow.document.createElement('div');
+  label.style.cssText = 'position:fixed;top:5px;left:10px;color:#22d3ee;font:12px monospace;opacity:0.5;';
+  label.textContent = `Beltinator Panoramic | ${panoWidth}×${panoHeight} | Equirectangular`;
+  panoWindow.document.body.appendChild(label);
+
+  console.log(`Panoramic output window opened (${panoWidth}×${panoHeight}). Capture with NDI Scan Converter.`);
+  panoStreaming = true;
+}
+
+function updatePanoWindow() {
+  if (!panoWindow || panoWindow.closed || !panoCanvas) { panoStreaming = false; return; }
+  const popupCanvas = panoWindow.document.getElementById('pano-output');
+  if (popupCanvas) {
+    const ctx = popupCanvas.getContext('2d');
+    ctx.drawImage(panoCanvas, 0, 0, popupCanvas.width, popupCanvas.height);
+  }
+}
+
+function stopPanoStream() {
+  panoStreaming = false;
+  if (panoWindow && !panoWindow.closed) panoWindow.close();
+  panoWindow = null;
+  console.log('Panoramic stream stopped');
+}
+
+// ── Desktop Controls for Panoramic Rendering ──────────────────────
+function buildPanoControls() {
+  const bar = document.createElement('div');
+  bar.id = 'pano-controls';
+  bar.style.cssText = [
+    'position:fixed', 'top:70px', 'right:10px', 'z-index:10000',
+    'background:rgba(6,8,15,0.95)', 'border:1px solid rgba(34,211,238,0.3)',
+    'border-radius:10px', 'padding:12px 16px', 'min-width:300px',
+    'font-family:"JetBrains Mono",monospace', 'font-size:12px',
+  ].join(';');
+
+  bar.innerHTML = `
+    <div style="color:#22d3ee;font-weight:bold;font-size:13px;margin-bottom:10px;">
+      PANORAMIC RENDERING / IGLOO
+    </div>
+
+    <div style="margin-bottom:8px;">
+      <label style="color:#94a3b8;font-size:11px;">Output Resolution (equirectangular 2:1):</label><br>
+      <select id="pano-res-select" style="
+        width:100%;margin-top:4px;padding:6px 8px;
+        background:rgba(16,22,40,0.9);color:#e2e8f0;
+        border:1px solid rgba(34,211,238,0.2);border-radius:6px;
+        font:12px 'JetBrains Mono',monospace;cursor:pointer;
+      ">
+        ${PANO_RESOLUTIONS.map((r, i) =>
+          `<option value="${i}" ${i === 1 ? 'selected' : ''}>${r.label}</option>`
+        ).join('')}
+      </select>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <button id="pano-toggle-btn" style="
+        flex:1;padding:8px;border:1px solid #22d3ee;border-radius:6px;
+        background:transparent;color:#22d3ee;font:bold 11px 'JetBrains Mono',monospace;
+        cursor:pointer;transition:all 0.2s;
+      ">ENABLE PANORAMIC</button>
+
+      <button id="pano-stream-btn" style="
+        flex:1;padding:8px;border:1px solid #10b981;border-radius:6px;
+        background:transparent;color:#10b981;font:bold 11px 'JetBrains Mono',monospace;
+        cursor:pointer;transition:all 0.2s;
+      " disabled>OPEN OUTPUT</button>
+    </div>
+
+    <div id="pano-status" style="color:#475569;font-size:10px;line-height:1.5;">
+      Status: Idle<br>
+      Renders equirectangular panorama for IGLOO Core Engine
+    </div>
+
+    <div id="pano-preview" style="margin-top:8px;display:none;">
+      <div style="color:#475569;font-size:10px;margin-bottom:4px;">Preview (equirectangular):</div>
+      <canvas id="pano-preview-canvas" width="300" height="150" style="
+        width:100%;border:1px solid rgba(34,211,238,0.15);border-radius:4px;
+      "></canvas>
+    </div>
+  `;
+
+  document.body.appendChild(bar);
+
+  // Wire controls
+  const resSelect = document.getElementById('pano-res-select');
+  const panoBtn = document.getElementById('pano-toggle-btn');
+  const streamBtn = document.getElementById('pano-stream-btn');
+  const statusEl = document.getElementById('pano-status');
+  const previewEl = document.getElementById('pano-preview');
+  const previewCanvas = document.getElementById('pano-preview-canvas');
+
+  panoBtn.addEventListener('click', () => {
+    panoMode = !panoMode;
+    if (panoMode) {
+      const resIdx = parseInt(resSelect.value);
+      initPanoMode(resIdx);
+      panoBtn.textContent = 'DISABLE PANORAMIC';
+      panoBtn.style.borderColor = '#ef4444';
+      panoBtn.style.color = '#ef4444';
+      streamBtn.disabled = false;
+      previewEl.style.display = 'block';
+      const res = PANO_RESOLUTIONS[resIdx];
+      statusEl.innerHTML = `Status: Panoramic active<br>${res.w}×${res.h} equirectangular`;
+      const fpEl = document.getElementById('fps-counter');
+      if (fpEl) fpEl.textContent = 'Panoramic';
+    } else {
+      panoBtn.textContent = 'ENABLE PANORAMIC';
+      panoBtn.style.borderColor = '#22d3ee';
+      panoBtn.style.color = '#22d3ee';
+      streamBtn.disabled = true;
+      previewEl.style.display = 'none';
+      stopPanoStream();
+      streamBtn.textContent = 'OPEN OUTPUT';
+      streamBtn.style.borderColor = '#10b981';
+      streamBtn.style.color = '#10b981';
+      statusEl.innerHTML = 'Status: Idle';
+      const fpEl = document.getElementById('fps-counter');
+      if (fpEl) fpEl.textContent = 'Rendering';
+    }
+    console.log('Panoramic mode: ' + (panoMode ? 'ON' : 'OFF'));
+  });
+
+  streamBtn.addEventListener('click', () => {
+    if (!panoStreaming) {
+      openPanoWindow();
+      streamBtn.textContent = 'CLOSE OUTPUT';
+      streamBtn.style.borderColor = '#ef4444';
+      streamBtn.style.color = '#ef4444';
+      statusEl.innerHTML = `Status: Streaming panorama<br>Capture output window with NDI Scan Converter`;
+    } else {
+      stopPanoStream();
+      streamBtn.textContent = 'OPEN OUTPUT';
+      streamBtn.style.borderColor = '#10b981';
+      streamBtn.style.color = '#10b981';
+      statusEl.innerHTML = 'Status: Panoramic active (output closed)';
+    }
+  });
+
+  resSelect.addEventListener('change', () => {
+    if (panoMode) {
+      const resIdx = parseInt(resSelect.value);
+      initPanoMode(resIdx);
+      const res = PANO_RESOLUTIONS[resIdx];
+      statusEl.innerHTML = `Status: Panoramic active<br>${res.w}×${res.h} equirectangular`;
+      if (panoWindow && !panoWindow.closed) {
+        const pc = panoWindow.document.getElementById('pano-output');
+        if (pc) { pc.width = res.w; pc.height = res.h; }
+      }
+    }
+  });
+
+  // Preview updater (called from animate loop)
+  window._updatePanoPreview = () => {
+    if (!panoMode || !panoCanvas) return;
+    const ctx = previewCanvas.getContext('2d');
+    ctx.drawImage(panoCanvas, 0, 0, 300, 150);
+  };
+}
+
+buildPanoControls();
+
+// Keep 'I' key as shortcut
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'i' || e.key === 'I') {
+    document.getElementById('pano-toggle-btn')?.click();
+  }
+});
+
+// ==================== WEBSOCKET SPLIT-MODE =====================
+// URL params: ?mode=igloo (renderer only) or ?mode=controller (tablet UI)
+// When in split mode, state changes are relayed via WebSocket
+const urlParams = new URLSearchParams(window.location.search);
+const wsMode = urlParams.get('mode'); // 'igloo', 'controller', or null (standalone)
+let wsConn = null;
+
+if (wsMode === 'igloo' || wsMode === 'controller') {
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${wsProtocol}//${window.location.host}/?mode=${wsMode}`;
+  console.log('WebSocket connecting as ' + wsMode + ' to ' + wsUrl);
+
+  wsConn = new WebSocket(wsUrl);
+  wsConn.onopen = () => console.log('WebSocket connected as ' + wsMode);
+  wsConn.onerror = (e) => console.error('WebSocket error:', e);
+  wsConn.onclose = () => { console.warn('WebSocket disconnected'); wsConn = null; };
+
+  wsConn.onmessage = (evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      if (wsMode === 'igloo') {
+        // IGLOO receives commands from controller
+        if (msg.type === 'state') {
+          Object.assign(state, msg.data);
+          onStateChange();
+        } else if (msg.type === 'preset') {
+          applyPreset(msg.data);
+        } else if (msg.type === 'camera') {
+          // Controller is sending camera orientation for IGLOO cubemap
+          if (msg.data.camH !== undefined) { camH = msg.data.camH; camTargetH = camH; }
+          if (msg.data.camV !== undefined) { camV = msg.data.camV; camTargetV = camV; }
+          if (msg.data.camDist !== undefined) { camDist = msg.data.camDist; camTargetDist = camDist; }
+        } else if (msg.type === 'focusSat') {
+          focusSatByName(msg.data);
+        } else if (msg.type === 'zoomBack') {
+          zoomBackToOverview();
+        } else if (msg.type === 'toggle') {
+          // Toggle visibility from controller
+          if (msg.data.key && msg.data.value !== undefined) {
+            state[msg.data.key] = msg.data.value;
+            onStateChange();
+          }
+        } else if (msg.type === 'iglooRes') {
+          // Change cubemap resolution from controller
+          const newRes = parseInt(msg.data);
+          if (newRes && cubeRenderTarget) {
+            cubeRenderTarget.setSize(newRes, newRes);
+            console.log('IGLOO resolution changed to ' + newRes);
+          }
+        }
+      } else if (wsMode === 'controller') {
+        // Controller receives computed values from IGLOO
+        if (msg.type === 'computed') {
+          try {
+            if (msg.data.bounce) document.getElementById('bounce-val').textContent = msg.data.bounce;
+            if (msg.data.psd) document.getElementById('psd-val').textContent = msg.data.psd;
+            if (msg.data.flux) document.getElementById('flux-val').textContent = msg.data.flux;
+            if (msg.data.dll) document.getElementById('dll-live').textContent = msg.data.dll;
+            if (msg.data.kp) document.getElementById('kp-current-val').textContent = msg.data.kp;
+            if (msg.data.lmp) document.getElementById('lmp-val').innerHTML = msg.data.lmp;
+            if (msg.data.lcds) document.getElementById('lcds-val').innerHTML = msg.data.lcds;
+            if (msg.data.blc) document.getElementById('blc-val').textContent = msg.data.blc;
+            if (msg.data.dlc) document.getElementById('dlc-val').textContent = msg.data.dlc;
+            if (msg.data.status) document.getElementById('trap-status').textContent = msg.data.status;
+          } catch(e) {}
+        }
+      }
+    } catch(e) { console.error('WS message parse error:', e); }
+  };
+}
+
+// Hook into state changes to send over WebSocket
+const origOnStateChange = typeof onStateChange === 'function' ? onStateChange : null;
+function wsOnStateChange() {
+  if (origOnStateChange) origOnStateChange();
+  if (wsConn && wsConn.readyState === 1 && wsMode === 'controller') {
+    wsConn.send(JSON.stringify({ type: 'state', data: state }));
+  }
+}
+
+// ── Controller mode: Add camera reorientation touch controls ──────
+// The Surface tablet shows the full UI plus a reorientation pad
+if (wsMode === 'controller') {
+  // Add a camera control pad to the bottom of the page
+  const padContainer = document.createElement('div');
+  padContainer.id = 'igloo-camera-pad';
+  padContainer.style.cssText = [
+    'position:fixed', 'bottom:60px', 'left:50%', 'transform:translateX(-50%)',
+    'width:300px', 'height:200px',
+    'background:rgba(6,8,15,0.9)', 'border:1px solid #22d3ee',
+    'border-radius:12px', 'z-index:9999', 'touch-action:none',
+    'display:flex', 'flex-direction:column', 'align-items:center', 'justify-content:center',
+  ].join(';');
+
+  const padLabel = document.createElement('div');
+  padLabel.textContent = 'IGLOO CAMERA CONTROL';
+  padLabel.style.cssText = 'color:#22d3ee;font:bold 11px monospace;margin-bottom:8px;letter-spacing:1px;';
+  padContainer.appendChild(padLabel);
+
+  const padInstructions = document.createElement('div');
+  padInstructions.textContent = 'Drag to orbit • Pinch to zoom';
+  padInstructions.style.cssText = 'color:#475569;font:10px monospace;margin-bottom:12px;';
+  padContainer.appendChild(padInstructions);
+
+  // Touch pad area
+  const padArea = document.createElement('div');
+  padArea.style.cssText = 'width:260px;height:120px;background:rgba(34,211,238,0.05);border:1px solid #22d3ee30;border-radius:8px;position:relative;';
+  padContainer.appendChild(padArea);
+
+  // Crosshair
+  const crossH = document.createElement('div');
+  crossH.style.cssText = 'position:absolute;top:50%;left:10%;right:10%;height:1px;background:#22d3ee20;';
+  padArea.appendChild(crossH);
+  const crossV = document.createElement('div');
+  crossV.style.cssText = 'position:absolute;left:50%;top:10%;bottom:10%;width:1px;background:#22d3ee20;';
+  padArea.appendChild(crossV);
+
+  document.body.appendChild(padContainer);
+
+  // Touch/mouse handling for camera pad
+  let padDragging = false;
+  let padLastPos = { x: 0, y: 0 };
+  let padLastPinchDist = 0;
+  // Track camera state locally for the controller
+  let controllerCamH = 0.7;
+  let controllerCamV = 0.45;
+  let controllerCamDist = 16;
+
+  function sendCamera() {
+    if (wsConn && wsConn.readyState === 1) {
+      wsConn.send(JSON.stringify({
+        type: 'camera',
+        data: { camH: controllerCamH, camV: controllerCamV, camDist: controllerCamDist }
+      }));
+    }
+  }
+
+  padArea.addEventListener('pointerdown', (e) => {
+    padDragging = true;
+    padLastPos = { x: e.clientX, y: e.clientY };
+    padArea.setPointerCapture(e.pointerId);
+  });
+
+  padArea.addEventListener('pointermove', (e) => {
+    if (!padDragging) return;
+    const dx = e.clientX - padLastPos.x;
+    const dy = e.clientY - padLastPos.y;
+    padLastPos = { x: e.clientX, y: e.clientY };
+    controllerCamH += dx * 0.008;
+    controllerCamV = Math.max(-1.2, Math.min(1.2, controllerCamV + dy * 0.008));
+    sendCamera();
+  });
+
+  padArea.addEventListener('pointerup', () => { padDragging = false; });
+  padArea.addEventListener('pointercancel', () => { padDragging = false; });
+
+  // Pinch to zoom on the pad (two-finger touch)
+  padArea.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (padLastPinchDist > 0) {
+        const delta = dist - padLastPinchDist;
+        controllerCamDist = Math.max(4, Math.min(40, controllerCamDist - delta * 0.05));
+        sendCamera();
+      }
+      padLastPinchDist = dist;
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  padArea.addEventListener('touchend', () => { padLastPinchDist = 0; });
+
+  // Mouse wheel zoom on pad
+  padArea.addEventListener('wheel', (e) => {
+    controllerCamDist = Math.max(4, Math.min(40, controllerCamDist + e.deltaY * 0.01));
+    sendCamera();
+    e.preventDefault();
+  }, { passive: false });
+
+  // Also hook slider changes to send over WS
+  document.querySelectorAll('input[type=range]').forEach(slider => {
+    slider.addEventListener('input', () => {
+      if (wsConn && wsConn.readyState === 1) {
+        wsConn.send(JSON.stringify({ type: 'state', data: state }));
+      }
+    });
+  });
+
+  // Hook preset buttons
+  document.querySelectorAll('.preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const presetName = btn.textContent.trim();
+      if (wsConn && wsConn.readyState === 1) {
+        wsConn.send(JSON.stringify({ type: 'preset', data: presetName }));
+      }
+    });
+  });
+
+  // Hook satellite focus buttons
+  document.querySelectorAll('.sat-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const satName = btn.dataset.sat;
+      if (satName && wsConn && wsConn.readyState === 1) {
+        wsConn.send(JSON.stringify({ type: 'focusSat', data: satName }));
+      }
+    });
+  });
+}
+
+// In IGLOO mode: hide UI panels, maximize 3D viewport, auto-enable cubemap
+if (wsMode === 'igloo') {
+  document.querySelectorAll('.control-panel, .right-panel, .top-bar, .bottom-bar').forEach(el => {
+    if (el) el.style.display = 'none';
+  });
+  // Auto-enable panoramic mode
+  setTimeout(() => {
+    panoMode = true;
+    initPanoMode(1); // Standard resolution
+    console.log('Panoramic mode auto-enabled for IGLOO');
+  }, 1000);
+
+  // Send computed values back to controller every second
+  setInterval(() => {
+    if (wsConn && wsConn.readyState === 1) {
+      const cv = computedValues || {};
+      wsConn.send(JSON.stringify({
+        type: 'computed',
+        data: {
+          bounce: cv.bounceFactor ? cv.bounceFactor.toFixed(4) : '',
+          psd: cv.psd ? cv.psd.toExponential(2) : '',
+          flux: cv.flux ? cv.flux.toExponential(2) : '',
+          dll: cv.dllVal ? cv.dllVal.toExponential(2) : '',
+          kp: currentKpValue.toFixed(1),
+          lmp: cv.lmp ? cv.lmp.toFixed(1) + ' R<sub>E</sub>' : '',
+          lcds: cv.lcds ? cv.lcds.toFixed(1) + ' R<sub>E</sub>' : '',
+          blc: cv.blc ? cv.blc.toFixed(1) + '°' : '',
+          dlc: cv.dlc ? cv.dlc.toFixed(1) + '°' : '',
+          status: cv.status || '',
+        }
+      }));
+    }
+  }, 1000);
+}
+
+// ==================== INIT ====================
+console.log('Three.js version:', THREE.REVISION);
+console.log('Renderer:', renderer.info.render);
+console.log('XR enabled:', renderer.xr.enabled);
+console.log('Scene children at init:', scene.children.length);
+updateComputedValues();
+
+// Use setAnimationLoop for WebXR compatibility (works for both VR and desktop)
+renderer.setAnimationLoop(animate);
+</script>
+</body>
+</html>
